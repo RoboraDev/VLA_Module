@@ -32,8 +32,11 @@ This project uses the UV package manager for dependency management. Ensure you h
 git clone https://github.com/RoboraDev/VLA_Module.git
 cd VLA_Module
 
-# Install dependencies using UV
+# Install dependencies using UV (Recommended)
 uv sync
+
+# Or if you want to use python 3.11 virtual environment
+python311 -m venv .venv
 
 # Activate the virtual environment (If needed)
 source .venv/bin/activate
