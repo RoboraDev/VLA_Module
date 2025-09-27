@@ -1,0 +1,220 @@
+# SmolVLA Model Configuration
+# Usecase: A Small & highly efficient VLA Model for robotics
+
+model:
+  name: "smolvla"
+  display_name: "SmolVLA"
+  version: "base"           # Vanilla version
+  description: "SmolVLA: A vision-language-action model for affordable and efficient robotics"
+  
+  # Model specifications
+  architecture:
+    type: "vision-language-action"
+    backbone: "SmolVLM2"
+    parameters: "450M"
+    vision_encoder: "SmolVLM2 Vision Component"
+    language_model: "SmolVLM2 Language Component" 
+    action_expert: "Flow Matching Action Head"
+    total_size_gb: 0.9                                      # Exact model weights size, inference size may be different.
+    
+  # Hugging Face Hub details
+  hub:
+    repo_id: "lerobot/smolvla_base"
+    model_type: "lerobot"
+    library: "lerobot"
+    pipeline_tag: "robotics"
+    license: "apache-2.0"
+    tags: ["robotics", "vision-language-action", "lerobot", "smolvla"]
+    
+  # Model capabilities and features
+  capabilities:
+    vision:
+      - "Multi-camera input support"
+      - "Real-time image processing"
+      - "Scene understanding"
+    language:
+      - "Natural language instruction following"
+      - "Task description parsing"
+      - "Context awareness"
+    action:
+      - "Flow matching action generation"
+      - "Real-time control (50Hz capable)"
+      - "Action chunk prediction"
+      - "Continuous action spaces"
+    
+  # Performance characteristics
+  performance:
+    inference_speed: "Real-time"
+    action_frequency: "50Hz"
+    memory_usage: "Low (consumer hardware compatible)"
+    gpu_requirements: "Optional (CPU inference possible)"
+    recommended_gpu: "GTX 1060 or higher"
+    
+  # Training and fine-tuning
+  training:
+    pretrained_weights: true
+    fine_tuning_strategies:
+      - "Action head fine-tuning (recommended)"
+      - "Full model fine-tuning"
+    recommended_episodes: 50
+    training_time_single_a100: "~4 hours (20k steps)"
+    batch_size_default: 64
+    learning_rate_default: 1e-4
+    
+  # Input/Output specifications  
+  input:
+    image:
+      format: ["RGB", "RGBD"]
+      resolution: [224, 224]  # Typical vision transformer input
+      channels: [3, 4]  # RGB or RGBD
+      preprocessing: "Standard normalization"
+    instruction:
+      type: "text"
+      max_length: 512  # Typical for language models
+      encoding: "tokenized"
+    
+    
+    # Important parameter I need to take special care about! # TODO-1 for Shiven make sure the proprioception is taken care of inside sim environment
+    # Add some random sensor noise and irregularities so, the model can have proper sim to real abilities transfer.
+    proprioception:
+      joint_positions: true
+      joint_velocities: true
+      end_effector_pose: true
+      
+  output:
+    action:
+      type: "continuous"
+      dimensions: 7  # Trained on https://huggingface.co/datasets/lerobot/svla_so101_pickplace 
+      format: "action_chunk"
+      chunk_size: 8  # 7 FOR JOINTS AND 8th ONE FOR GRIPPER STATUS (OPEN/CLOSE)
+      prediction_horizon: "Multi-step"          # Flow matching makes the action transformer generate action chunks in parallel.
+      
+  # Dependencies and requirements for PyTorch with CUDA 12.8 Runtime.
+  dependencies:
+    core:
+      - "lerobot>=0.3.2"
+      - "torch>=2.8.0"
+      - "torchvision>=0.23.0" 
+      - "transformers>=4.56.2"
+      - "numpy>=2.3.3"
+    optional:
+      - "wandb"  # For training visualization
+      - "opencv-python"  # For camera input
+      - "pillow"  # For image processing
+      
+  # Installation and setup
+  installation:
+    command: 'pip install -e ".[smolvla]"'
+    extra_dependencies: "smolvla"
+    environment_setup: "LeRobot installation required"
+    
+  # Usage examples and commands
+  usage:
+    download:
+      cli: "uv run vla-cli download --model smolvla --cache-dir ./models"
+      python: |
+        from vla_module.models import load_model
+        model = load_model("smolvla", device="cuda")
+        
+    inference:
+      cli: 'uv run vla-cli infer --model smolvla --image path/to/image.jpg --command "pick up the red cube"'
+      python: |
+        from vla_module.models.inference import VLAInference
+        inference_engine = VLAInference(model)
+        actions = inference_engine.predict(image_path="observation.jpg", command="move forward")
+        
+    training:
+      fine_tune_action_head: |
+        lerobot-train \
+          --policy.path=lerobot/smolvla_base \
+          --dataset.repo_id=your_dataset \
+          --batch_size=64 \
+          --steps=20000 \
+          --output_dir=outputs/train/my_smolvla \
+          --policy.device=cuda
+          
+      train_from_scratch: |
+        lerobot-train \
+          --dataset.repo_id=your_dataset \
+          --batch_size=64 \
+          --steps=200000 \
+          --output_dir=outputs/train/my_smolvla \
+          --policy.device=cuda
+          
+    api_server:
+      start: "uv run vla-cli serve --model smolvla --host 0.0.0.0 --port 8000"
+      endpoint: "POST /inference"
+      
+  # Documentation and resources
+  resources:
+    paper: "https://huggingface.co/papers/2506.01844"
+    blog_post: "https://huggingface.co/blog/smolvla"
+    documentation: "https://huggingface.co/docs/lerobot/smolvla"
+    code: "https://github.com/huggingface/lerobot/blob/main/lerobot/common/policies/smolvla/modeling_smolvla.py"
+    colab_training: "https://colab.research.google.com/github/huggingface/notebooks/blob/main/lerobot/training-smolvla.ipynb"
+    model_hub: "https://huggingface.co/lerobot/smolvla_base"
+    example_dataset: "https://huggingface.co/datasets/lerobot/svla_so101_pickplace"
+    
+  # Compatibility and integration
+  compatibility:
+    frameworks: ["LeRobot", "PyTorch", "Transformers"]
+    robots:
+      - "SO101 Follower Arm"
+      - "Universal robot arms (7-DOF)"
+      - "Custom robot platforms (with fine-tuning)"
+    cameras: ["RGB cameras", "RGBD cameras", "Multi-camera setups"]
+    environments: ["Real-world robotics", "Simulation (PyBullet)", "Mixed reality"]
+    
+  # Evaluation and benchmarking  
+  evaluation:
+    datasets:
+      - "SVLA SO100 PickPlace"
+      - "Custom task datasets"
+    metrics:
+      - "Success rate"
+      - "Task completion time"
+      - "Action accuracy"
+      - "Language following rate"
+    benchmark_performance:
+      pick_place_success: "High (with fine-tuning)"
+      language_following: "Excellent"
+      generalization: "Good (with sufficient training data)"
+      
+  # Configuration overrides for specific use cases
+  presets:
+    development:
+      batch_size: 32
+      steps: 10000
+      device: "cpu"
+      wandb_enabled: false
+      
+    production:
+      batch_size: 64
+      steps: 20000
+      device: "cuda"
+      wandb_enabled: true
+      optimization: "torch.compile"
+      
+    research:
+      batch_size: 128
+      steps: 50000
+      device: "cuda"
+      wandb_enabled: true
+      detailed_logging: true
+      
+# Additional metadata
+metadata:
+  created_by: "VLA_Modules Framework"
+  version: "1.0.0"
+  last_updated: "2025-09-24"
+  status: "active"
+  priority: "high"
+  category: "vision-language-action"
+  
+# Notes for developers
+notes: |
+  SmolVLA is optimized for consumer hardware with 450M parameters.
+  It uses flow matching for action generation, providing real-time control capabilities.
+  Fine-tuning with ~50 episodes is recommended for good performance on new tasks.
+  The model excels at pick-and-place tasks and natural language instruction following.
+  Consider using action head fine-tuning for faster training and better stability.
