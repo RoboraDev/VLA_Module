@@ -5,15 +5,13 @@ description = "Modular Vision-Language-Action Fine-tuning for Robotics Infrastru
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "lerobot>=0.3.2",
     "numpy>=2.3.3",
     "pandas>=2.3.2",
-    "torch>=2.8.0",
-    "torchvision>=0.23.0",
-    "transformers>=4.56.2",
     "pyyaml>=6.0",
     "huggingface-hub>=0.25.0",
     "rich>=13.0.0",
+    "torchvision<0.23",
+    "lerobot[smolvla]==0.3.3",
 ]
 
 [project.scripts]
