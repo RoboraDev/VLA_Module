@@ -997,6 +997,9 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+pi0 = [
+    { name = "transformers" },
+]
 smolvla = [
     { name = "accelerate" },
     { name = "num2words" },
@@ -2701,9 +2704,10 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "huggingface-hub" },
-    { name = "lerobot", extra = ["smolvla"] },
+    { name = "lerobot", extra = ["pi0", "smolvla"] },
     { name = "numpy" },
     { name = "pandas" },
+    { name = "pytest" },
     { name = "pyyaml" },
     { name = "rich" },
     { name = "torchvision" },
@@ -2724,9 +2728,10 @@ requires-dist = [
     { name = "flake8", marker = "extra == 'dev'", specifier = ">=6.0.0" },
     { name = "huggingface-hub", specifier = ">=0.25.0" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.12.0" },
-    { name = "lerobot", extras = ["smolvla"], specifier = "==0.3.3" },
+    { name = "lerobot", extras = ["pi0", "smolvla"], specifier = "==0.3.3" },
     { name = "numpy", specifier = ">=2.3.3" },
     { name = "pandas", specifier = ">=2.3.2" },
+    { name = "pytest", specifier = ">=8.4.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "pyyaml", specifier = ">=6.0" },
