@@ -10,8 +10,8 @@ model:
   # Model specifications
   architecture:
     type: "vision-language-action"
-    backbone: "SmolVLM2"
-    parameters: "450M"
+    backbone: "SmolVLM2-500M-Video-Instruct"
+    parameters: "450046212"
     vision_encoder: "SmolVLM2 Vision Component"
     language_model: "SmolVLM2 Language Component" 
     action_expert: "Flow Matching Action Head"
