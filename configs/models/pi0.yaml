@@ -1,0 +1,1040 @@
+# Pi0 Model Configuration
+# Usecase: A good enough yet efficient vision–action policy for robotics (no language module)
+### Additional Note:- ffmpeg, gstreamer must be installed on the system running infernece.
+
+model:
+  name: "pi0"
+  display_name: "Pi0"
+  version: "base"         # Vanilla version
+  description: "Pi0: a compact vision–language-action policy for real-time robotics on edge devices"
+
+  architecture:
+    type: "vision-language-action"
+    backbone: "PaliGemma"
+    parameters: "3501372212"        # Around 3.5B
+    vision_encoder: "paligemma"
+    language_model: null
+    action_expert: "Gaussian MLP Policy"
+    total_size_gb: 0.09
+
+  hub:
+    repo_id: "lerobot/pi0_base"
+    model_type: "lerobot"
+    library: "lerobot"
+    pipeline_tag: "robotics"
+    license: "apache-2.0"
+    tags: ["robotics", "vision-language-action", "lerobot", "pi0"]
+
+  capabilities:
+    vision:
+      - "Single/Multi-camera input"
+      - "Low-latency image processing"
+      - "Scene features via lightweight encoder"
+    language:
+      - "Disabled (no instruction following)"
+    action:
+      - "Direct continuous action prediction"
+      - "Real-time control (50–100Hz capable)"
+      - "Supports delta or absolute joint commands"
+
+  performance:
+    inference_speed: "Real-time"
+    action_frequency: "50–100Hz"          # Advantage of using pi0 over other VLA
+    memory_usage: "8-10GiB"
+    gpu_requirements: "None (CPU-first)"  # only on this system
+    recommended_gpu: "Optional (any CUDA-capable GPU)"
+
+  training:
+    pretrained_weights: true
+    fine_tuning_strategies:
+      - "Full model fine-tuning"
+      - "Action head fine-tuning"
+    recommended_episodes: 30
+    training_time_single_a100: "~2 hours (20k steps)"
+    batch_size_default: 128
+    learning_rate_default: 3e-4
+
+  input:
+    image:
+      format: ["RGB"]
+      resolution: [128, 128]
+      channels: [3]
+      preprocessing: "Normalize, center-crop"
+    goal:
+      type: "optional"
+      modalities: ["text", "image"]  # If enabled, text/image goal is embedded with tiny adapters
+      max_length: 128
+    proprioception:
+      joint_positions: true
+      joint_velocities: true
+      end_effector_pose: true
+      noise:
+        enabled: true
+        position_std: 0.002
+        velocity_std: 0.01
+        dropout_prob: 0.05
+
+  output:
+    action:
+      type: "continuous"
+      dimensions: 7
+      format: "single_step"
+      chunk_size: 1
+      prediction_horizon: "Single-step (optionally short-horizon with frame stacking)"
+
+  dependencies:
+    core:
+      - "lerobot>=0.3.2"
+      - "torch>=2.3.0"
+      - "torchvision>=0.18.0"
+      - "numpy>=2.0.0"
+    optional:
+      - "onnx>=1.16.0"
+      - "onnxruntime>=1.18.0"
+      - "opencv-python"
+      - "pillow"
+      - "wandb"
+
+  installation:
+    command: 'pip install -e ".[pi0]"'
+    extra_dependencies: "pi0"
+    environment_setup: "LeRobot installation required"
+
+  usage:
+    download:
+      cli: "uv run vla-cli download --model pi0 --cache-dir ./models"
+      python: |
+        from vla_module.models import load_model
+        model = load_model("pi0", device="cpu")
+    inference:
+      cli: 'uv run vla-cli infer --model pi0 --image path/to/image.jpg'
+      python: |
+        from vla_module.models.inference import VLAInference
+        engine = VLAInference(model)
+        actions = engine.predict(image_path="observation.jpg")
+    training:
+      fine_tune_full: |
+        lerobot-train \
+          --policy.path=lerobot/pi0_base \
+          --dataset.repo_id=your_dataset \
+          --batch_size=128 \
+          --steps=20000 \
+          --output_dir=outputs/train/my_pi0 \
+          --policy.device=cuda
+      train_from_scratch: |
+        lerobot-train \
+          --dataset.repo_id=your_dataset \
+          --batch_size=128 \
+          --steps=200000 \
+          --output_dir=outputs/train/my_pi0 \
+          --policy.device=cuda
+    api_server:
+      start: "uv run vla-cli serve --model pi0 --host 0.0.0.0 --port 8000"
+      endpoint: "POST /inference"
+
+  resources:
+    paper: "Pi0 policy overview (LeRobot docs)"
+    documentation: "Pi0 usage and training guides"
+    model_hub: "Pi0 base checkpoint (LeRobot)"
+    example_dataset: "SVLA SO101 PickPlace (Pi0-compatible)"
+
+  compatibility:
+    frameworks: ["LeRobot", "PyTorch", "ONNX Runtime"]
+    robots:
+      - "SO101 Follower Arm"
+      - "7-DOF arms"
+      - "Custom platforms (fine-tuned)"
+    cameras: ["RGB cameras", "Multi-camera setups"]
+    environments: ["Real-world", "Simulation (PyBullet)", "Mixed reality"]
+
+  evaluation:
+    datasets:
+      - "SVLA SO100/101 PickPlace"
+      - "Custom task datasets"
+    metrics:
+      - "Success rate"
+      - "Task completion time"
+      - "Action stability"
+      - "Goal adherence"
+    benchmark_performance:
+      pick_place_success: "High (with task-specific fine-tuning)"
+      action_latency: "Low (edge CPU)"
+      generalization: "Moderate; improves with diverse demos"
+
+  presets:
+    edge_cpu:
+      batch_size: 1
+      steps: 10000
+      device: "cpu"
+      wandb_enabled: false
+      optimizations: ["int8 quantization", "onnxruntime"]
+    development:
+      batch_size: 32
+      steps: 10000
+      device: "cpu"
+      wandb_enabled: false
+    production:
+      batch_size: 64
+      steps: 20000
+      device: "cuda"
+      wandb_enabled: true
+      optimization: "torch.compile"
+    research:
+      batch_size: 128
+      steps: 50000
+      device: "cuda"
+      wandb_enabled: true
+      detailed_logging: true
+
+metadata:
+  created_by: "VLA_Modules Framework"
+  version: "1.0.0"
+  last_updated: "2025-10-13"
+  status: "active"
+  priority: "high"
+  category: "vision-language-action"
+
+notes: |
+  Pi0 removes the language model for maximal efficiency and edge deployment.
+  Use full-model fine-tuning for best performance; last-layer tuning is viable for quick adaptation.
+  Keep proprioception noise enabled in sim to improve sim-to-real transfer.
+  For ultra-low latency, export to ONNX and run with ONNX Runtime and INT8 quantization.
+
+action_head_modules: |
+  model.paligemma_with_expert.gemma_expert
+  model.state_proj
+  model.action_in_proj
+  model.action_out_proj
+  model.action_time_mlp_in
+  model.action_time_mlp_out
+
+modules: |
+  normalize_inputs
+  normalize_inputs.buffer_observation_state
+  normalize_targets
+  normalize_targets.buffer_action
+  unnormalize_outputs
+  unnormalize_outputs.buffer_action
+  model
+  model.paligemma_with_expert
+  model.paligemma_with_expert.paligemma
+  model.paligemma_with_expert.paligemma.vision_tower
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.embeddings
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.embeddings.patch_embedding
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.embeddings.position_embedding
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.0
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.0.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.0.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.0.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.0.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.0.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.0.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.0.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.0.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.0.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.0.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.0.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.1.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.1.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.1.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.1.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.1.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.1.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.1.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.1.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.1.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.1.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.1.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.2.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.2.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.2.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.2.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.2.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.2.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.2.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.2.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.2.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.2.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.2.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.3
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.3.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.3.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.3.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.3.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.3.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.3.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.3.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.3.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.3.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.3.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.3.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.4
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.4.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.4.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.4.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.4.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.4.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.4.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.4.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.4.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.4.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.4.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.4.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.5
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.5.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.5.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.5.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.5.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.5.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.5.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.5.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.5.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.5.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.5.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.5.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.6
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.6.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.6.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.6.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.6.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.6.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.6.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.6.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.6.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.6.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.6.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.6.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.7
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.7.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.7.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.7.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.7.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.7.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.7.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.7.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.7.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.7.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.7.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.7.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.8
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.8.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.8.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.8.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.8.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.8.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.8.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.8.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.8.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.8.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.8.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.8.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.9
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.9.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.9.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.9.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.9.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.9.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.9.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.9.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.9.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.9.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.9.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.9.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.10
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.10.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.10.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.10.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.10.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.10.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.10.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.10.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.10.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.10.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.10.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.10.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.11
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.11.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.11.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.11.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.11.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.11.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.11.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.11.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.11.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.11.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.11.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.11.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.12
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.12.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.12.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.12.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.12.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.12.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.12.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.12.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.12.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.12.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.12.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.12.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.13
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.13.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.13.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.13.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.13.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.13.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.13.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.13.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.13.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.13.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.13.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.13.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.14
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.14.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.14.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.14.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.14.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.14.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.14.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.14.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.14.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.14.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.14.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.14.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.15
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.15.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.15.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.15.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.15.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.15.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.15.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.15.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.15.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.15.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.15.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.15.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.16
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.16.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.16.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.16.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.16.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.16.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.16.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.16.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.16.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.16.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.16.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.16.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.17
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.17.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.17.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.17.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.17.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.17.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.17.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.17.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.17.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.17.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.17.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.17.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.18
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.18.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.18.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.18.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.18.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.18.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.18.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.18.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.18.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.18.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.18.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.18.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.19
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.19.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.19.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.19.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.19.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.19.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.19.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.19.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.19.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.19.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.19.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.19.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.20
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.20.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.20.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.20.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.20.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.20.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.20.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.20.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.20.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.20.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.20.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.20.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.21
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.21.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.21.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.21.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.21.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.21.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.21.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.21.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.21.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.21.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.21.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.21.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.22
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.22.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.22.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.22.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.22.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.22.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.22.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.22.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.22.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.22.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.22.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.22.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.23
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.23.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.23.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.23.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.23.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.23.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.23.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.23.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.23.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.23.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.23.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.23.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.24
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.24.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.24.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.24.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.24.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.24.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.24.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.24.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.24.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.24.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.24.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.24.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.25
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.25.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.25.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.25.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.25.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.25.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.25.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.25.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.25.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.25.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.25.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.25.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.26
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.26.layer_norm1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.26.self_attn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.26.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.26.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.26.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.26.self_attn.out_proj
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.26.layer_norm2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.26.mlp
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.26.mlp.activation_fn
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.26.mlp.fc1
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.encoder.layers.26.mlp.fc2
+  model.paligemma_with_expert.paligemma.vision_tower.vision_model.post_layernorm
+  model.paligemma_with_expert.paligemma.multi_modal_projector
+  model.paligemma_with_expert.paligemma.multi_modal_projector.linear
+  model.paligemma_with_expert.paligemma.language_model
+  model.paligemma_with_expert.paligemma.language_model.model
+  model.paligemma_with_expert.paligemma.language_model.model.embed_tokens
+  model.paligemma_with_expert.paligemma.language_model.model.layers
+  model.paligemma_with_expert.paligemma.language_model.model.layers.0
+  model.paligemma_with_expert.paligemma.language_model.model.layers.0.self_attn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.0.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.0.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.0.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.0.self_attn.o_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.0.mlp
+  model.paligemma_with_expert.paligemma.language_model.model.layers.0.mlp.gate_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.0.mlp.up_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.0.mlp.down_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.0.mlp.act_fn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.0.input_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.0.post_attention_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.1
+  model.paligemma_with_expert.paligemma.language_model.model.layers.1.self_attn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.1.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.1.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.1.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.1.self_attn.o_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.1.mlp
+  model.paligemma_with_expert.paligemma.language_model.model.layers.1.mlp.gate_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.1.mlp.up_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.1.mlp.down_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.1.mlp.act_fn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.1.input_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.1.post_attention_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.2
+  model.paligemma_with_expert.paligemma.language_model.model.layers.2.self_attn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.2.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.2.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.2.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.2.self_attn.o_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.2.mlp
+  model.paligemma_with_expert.paligemma.language_model.model.layers.2.mlp.gate_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.2.mlp.up_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.2.mlp.down_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.2.mlp.act_fn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.2.input_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.2.post_attention_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.3
+  model.paligemma_with_expert.paligemma.language_model.model.layers.3.self_attn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.3.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.3.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.3.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.3.self_attn.o_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.3.mlp
+  model.paligemma_with_expert.paligemma.language_model.model.layers.3.mlp.gate_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.3.mlp.up_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.3.mlp.down_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.3.mlp.act_fn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.3.input_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.3.post_attention_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.4
+  model.paligemma_with_expert.paligemma.language_model.model.layers.4.self_attn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.4.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.4.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.4.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.4.self_attn.o_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.4.mlp
+  model.paligemma_with_expert.paligemma.language_model.model.layers.4.mlp.gate_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.4.mlp.up_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.4.mlp.down_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.4.mlp.act_fn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.4.input_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.4.post_attention_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.5
+  model.paligemma_with_expert.paligemma.language_model.model.layers.5.self_attn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.5.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.5.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.5.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.5.self_attn.o_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.5.mlp
+  model.paligemma_with_expert.paligemma.language_model.model.layers.5.mlp.gate_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.5.mlp.up_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.5.mlp.down_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.5.mlp.act_fn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.5.input_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.5.post_attention_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.6
+  model.paligemma_with_expert.paligemma.language_model.model.layers.6.self_attn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.6.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.6.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.6.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.6.self_attn.o_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.6.mlp
+  model.paligemma_with_expert.paligemma.language_model.model.layers.6.mlp.gate_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.6.mlp.up_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.6.mlp.down_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.6.mlp.act_fn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.6.input_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.6.post_attention_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.7
+  model.paligemma_with_expert.paligemma.language_model.model.layers.7.self_attn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.7.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.7.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.7.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.7.self_attn.o_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.7.mlp
+  model.paligemma_with_expert.paligemma.language_model.model.layers.7.mlp.gate_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.7.mlp.up_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.7.mlp.down_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.7.mlp.act_fn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.7.input_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.7.post_attention_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.8
+  model.paligemma_with_expert.paligemma.language_model.model.layers.8.self_attn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.8.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.8.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.8.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.8.self_attn.o_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.8.mlp
+  model.paligemma_with_expert.paligemma.language_model.model.layers.8.mlp.gate_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.8.mlp.up_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.8.mlp.down_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.8.mlp.act_fn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.8.input_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.8.post_attention_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.9
+  model.paligemma_with_expert.paligemma.language_model.model.layers.9.self_attn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.9.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.9.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.9.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.9.self_attn.o_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.9.mlp
+  model.paligemma_with_expert.paligemma.language_model.model.layers.9.mlp.gate_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.9.mlp.up_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.9.mlp.down_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.9.mlp.act_fn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.9.input_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.9.post_attention_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.10
+  model.paligemma_with_expert.paligemma.language_model.model.layers.10.self_attn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.10.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.10.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.10.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.10.self_attn.o_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.10.mlp
+  model.paligemma_with_expert.paligemma.language_model.model.layers.10.mlp.gate_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.10.mlp.up_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.10.mlp.down_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.10.mlp.act_fn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.10.input_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.10.post_attention_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.11
+  model.paligemma_with_expert.paligemma.language_model.model.layers.11.self_attn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.11.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.11.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.11.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.11.self_attn.o_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.11.mlp
+  model.paligemma_with_expert.paligemma.language_model.model.layers.11.mlp.gate_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.11.mlp.up_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.11.mlp.down_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.11.mlp.act_fn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.11.input_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.11.post_attention_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.12
+  model.paligemma_with_expert.paligemma.language_model.model.layers.12.self_attn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.12.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.12.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.12.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.12.self_attn.o_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.12.mlp
+  model.paligemma_with_expert.paligemma.language_model.model.layers.12.mlp.gate_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.12.mlp.up_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.12.mlp.down_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.12.mlp.act_fn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.12.input_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.12.post_attention_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.13
+  model.paligemma_with_expert.paligemma.language_model.model.layers.13.self_attn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.13.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.13.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.13.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.13.self_attn.o_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.13.mlp
+  model.paligemma_with_expert.paligemma.language_model.model.layers.13.mlp.gate_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.13.mlp.up_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.13.mlp.down_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.13.mlp.act_fn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.13.input_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.13.post_attention_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.14
+  model.paligemma_with_expert.paligemma.language_model.model.layers.14.self_attn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.14.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.14.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.14.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.14.self_attn.o_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.14.mlp
+  model.paligemma_with_expert.paligemma.language_model.model.layers.14.mlp.gate_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.14.mlp.up_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.14.mlp.down_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.14.mlp.act_fn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.14.input_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.14.post_attention_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.15
+  model.paligemma_with_expert.paligemma.language_model.model.layers.15.self_attn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.15.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.15.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.15.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.15.self_attn.o_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.15.mlp
+  model.paligemma_with_expert.paligemma.language_model.model.layers.15.mlp.gate_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.15.mlp.up_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.15.mlp.down_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.15.mlp.act_fn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.15.input_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.15.post_attention_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.16
+  model.paligemma_with_expert.paligemma.language_model.model.layers.16.self_attn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.16.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.16.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.16.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.16.self_attn.o_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.16.mlp
+  model.paligemma_with_expert.paligemma.language_model.model.layers.16.mlp.gate_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.16.mlp.up_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.16.mlp.down_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.16.mlp.act_fn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.16.input_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.16.post_attention_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.17
+  model.paligemma_with_expert.paligemma.language_model.model.layers.17.self_attn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.17.self_attn.q_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.17.self_attn.k_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.17.self_attn.v_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.17.self_attn.o_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.17.mlp
+  model.paligemma_with_expert.paligemma.language_model.model.layers.17.mlp.gate_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.17.mlp.up_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.17.mlp.down_proj
+  model.paligemma_with_expert.paligemma.language_model.model.layers.17.mlp.act_fn
+  model.paligemma_with_expert.paligemma.language_model.model.layers.17.input_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.layers.17.post_attention_layernorm
+  model.paligemma_with_expert.paligemma.language_model.model.norm
+  model.paligemma_with_expert.paligemma.language_model.model.rotary_emb
+  model.paligemma_with_expert.paligemma.language_model.lm_head
+  model.paligemma_with_expert.gemma_expert
+  model.paligemma_with_expert.gemma_expert.model
+  model.paligemma_with_expert.gemma_expert.model.layers
+  model.paligemma_with_expert.gemma_expert.model.layers.0
+  model.paligemma_with_expert.gemma_expert.model.layers.0.self_attn
+  model.paligemma_with_expert.gemma_expert.model.layers.0.self_attn.q_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.0.self_attn.k_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.0.self_attn.v_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.0.self_attn.o_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.0.mlp
+  model.paligemma_with_expert.gemma_expert.model.layers.0.mlp.gate_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.0.mlp.up_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.0.mlp.down_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.0.mlp.act_fn
+  model.paligemma_with_expert.gemma_expert.model.layers.0.input_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.0.post_attention_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.1
+  model.paligemma_with_expert.gemma_expert.model.layers.1.self_attn
+  model.paligemma_with_expert.gemma_expert.model.layers.1.self_attn.q_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.1.self_attn.k_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.1.self_attn.v_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.1.self_attn.o_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.1.mlp
+  model.paligemma_with_expert.gemma_expert.model.layers.1.mlp.gate_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.1.mlp.up_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.1.mlp.down_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.1.mlp.act_fn
+  model.paligemma_with_expert.gemma_expert.model.layers.1.input_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.1.post_attention_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.2
+  model.paligemma_with_expert.gemma_expert.model.layers.2.self_attn
+  model.paligemma_with_expert.gemma_expert.model.layers.2.self_attn.q_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.2.self_attn.k_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.2.self_attn.v_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.2.self_attn.o_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.2.mlp
+  model.paligemma_with_expert.gemma_expert.model.layers.2.mlp.gate_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.2.mlp.up_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.2.mlp.down_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.2.mlp.act_fn
+  model.paligemma_with_expert.gemma_expert.model.layers.2.input_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.2.post_attention_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.3
+  model.paligemma_with_expert.gemma_expert.model.layers.3.self_attn
+  model.paligemma_with_expert.gemma_expert.model.layers.3.self_attn.q_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.3.self_attn.k_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.3.self_attn.v_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.3.self_attn.o_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.3.mlp
+  model.paligemma_with_expert.gemma_expert.model.layers.3.mlp.gate_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.3.mlp.up_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.3.mlp.down_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.3.mlp.act_fn
+  model.paligemma_with_expert.gemma_expert.model.layers.3.input_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.3.post_attention_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.4
+  model.paligemma_with_expert.gemma_expert.model.layers.4.self_attn
+  model.paligemma_with_expert.gemma_expert.model.layers.4.self_attn.q_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.4.self_attn.k_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.4.self_attn.v_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.4.self_attn.o_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.4.mlp
+  model.paligemma_with_expert.gemma_expert.model.layers.4.mlp.gate_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.4.mlp.up_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.4.mlp.down_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.4.mlp.act_fn
+  model.paligemma_with_expert.gemma_expert.model.layers.4.input_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.4.post_attention_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.5
+  model.paligemma_with_expert.gemma_expert.model.layers.5.self_attn
+  model.paligemma_with_expert.gemma_expert.model.layers.5.self_attn.q_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.5.self_attn.k_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.5.self_attn.v_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.5.self_attn.o_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.5.mlp
+  model.paligemma_with_expert.gemma_expert.model.layers.5.mlp.gate_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.5.mlp.up_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.5.mlp.down_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.5.mlp.act_fn
+  model.paligemma_with_expert.gemma_expert.model.layers.5.input_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.5.post_attention_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.6
+  model.paligemma_with_expert.gemma_expert.model.layers.6.self_attn
+  model.paligemma_with_expert.gemma_expert.model.layers.6.self_attn.q_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.6.self_attn.k_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.6.self_attn.v_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.6.self_attn.o_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.6.mlp
+  model.paligemma_with_expert.gemma_expert.model.layers.6.mlp.gate_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.6.mlp.up_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.6.mlp.down_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.6.mlp.act_fn
+  model.paligemma_with_expert.gemma_expert.model.layers.6.input_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.6.post_attention_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.7
+  model.paligemma_with_expert.gemma_expert.model.layers.7.self_attn
+  model.paligemma_with_expert.gemma_expert.model.layers.7.self_attn.q_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.7.self_attn.k_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.7.self_attn.v_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.7.self_attn.o_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.7.mlp
+  model.paligemma_with_expert.gemma_expert.model.layers.7.mlp.gate_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.7.mlp.up_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.7.mlp.down_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.7.mlp.act_fn
+  model.paligemma_with_expert.gemma_expert.model.layers.7.input_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.7.post_attention_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.8
+  model.paligemma_with_expert.gemma_expert.model.layers.8.self_attn
+  model.paligemma_with_expert.gemma_expert.model.layers.8.self_attn.q_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.8.self_attn.k_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.8.self_attn.v_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.8.self_attn.o_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.8.mlp
+  model.paligemma_with_expert.gemma_expert.model.layers.8.mlp.gate_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.8.mlp.up_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.8.mlp.down_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.8.mlp.act_fn
+  model.paligemma_with_expert.gemma_expert.model.layers.8.input_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.8.post_attention_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.9
+  model.paligemma_with_expert.gemma_expert.model.layers.9.self_attn
+  model.paligemma_with_expert.gemma_expert.model.layers.9.self_attn.q_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.9.self_attn.k_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.9.self_attn.v_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.9.self_attn.o_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.9.mlp
+  model.paligemma_with_expert.gemma_expert.model.layers.9.mlp.gate_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.9.mlp.up_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.9.mlp.down_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.9.mlp.act_fn
+  model.paligemma_with_expert.gemma_expert.model.layers.9.input_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.9.post_attention_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.10
+  model.paligemma_with_expert.gemma_expert.model.layers.10.self_attn
+  model.paligemma_with_expert.gemma_expert.model.layers.10.self_attn.q_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.10.self_attn.k_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.10.self_attn.v_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.10.self_attn.o_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.10.mlp
+  model.paligemma_with_expert.gemma_expert.model.layers.10.mlp.gate_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.10.mlp.up_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.10.mlp.down_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.10.mlp.act_fn
+  model.paligemma_with_expert.gemma_expert.model.layers.10.input_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.10.post_attention_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.11
+  model.paligemma_with_expert.gemma_expert.model.layers.11.self_attn
+  model.paligemma_with_expert.gemma_expert.model.layers.11.self_attn.q_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.11.self_attn.k_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.11.self_attn.v_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.11.self_attn.o_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.11.mlp
+  model.paligemma_with_expert.gemma_expert.model.layers.11.mlp.gate_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.11.mlp.up_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.11.mlp.down_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.11.mlp.act_fn
+  model.paligemma_with_expert.gemma_expert.model.layers.11.input_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.11.post_attention_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.12
+  model.paligemma_with_expert.gemma_expert.model.layers.12.self_attn
+  model.paligemma_with_expert.gemma_expert.model.layers.12.self_attn.q_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.12.self_attn.k_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.12.self_attn.v_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.12.self_attn.o_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.12.mlp
+  model.paligemma_with_expert.gemma_expert.model.layers.12.mlp.gate_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.12.mlp.up_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.12.mlp.down_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.12.mlp.act_fn
+  model.paligemma_with_expert.gemma_expert.model.layers.12.input_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.12.post_attention_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.13
+  model.paligemma_with_expert.gemma_expert.model.layers.13.self_attn
+  model.paligemma_with_expert.gemma_expert.model.layers.13.self_attn.q_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.13.self_attn.k_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.13.self_attn.v_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.13.self_attn.o_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.13.mlp
+  model.paligemma_with_expert.gemma_expert.model.layers.13.mlp.gate_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.13.mlp.up_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.13.mlp.down_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.13.mlp.act_fn
+  model.paligemma_with_expert.gemma_expert.model.layers.13.input_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.13.post_attention_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.14
+  model.paligemma_with_expert.gemma_expert.model.layers.14.self_attn
+  model.paligemma_with_expert.gemma_expert.model.layers.14.self_attn.q_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.14.self_attn.k_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.14.self_attn.v_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.14.self_attn.o_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.14.mlp
+  model.paligemma_with_expert.gemma_expert.model.layers.14.mlp.gate_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.14.mlp.up_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.14.mlp.down_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.14.mlp.act_fn
+  model.paligemma_with_expert.gemma_expert.model.layers.14.input_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.14.post_attention_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.15
+  model.paligemma_with_expert.gemma_expert.model.layers.15.self_attn
+  model.paligemma_with_expert.gemma_expert.model.layers.15.self_attn.q_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.15.self_attn.k_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.15.self_attn.v_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.15.self_attn.o_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.15.mlp
+  model.paligemma_with_expert.gemma_expert.model.layers.15.mlp.gate_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.15.mlp.up_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.15.mlp.down_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.15.mlp.act_fn
+  model.paligemma_with_expert.gemma_expert.model.layers.15.input_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.15.post_attention_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.16
+  model.paligemma_with_expert.gemma_expert.model.layers.16.self_attn
+  model.paligemma_with_expert.gemma_expert.model.layers.16.self_attn.q_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.16.self_attn.k_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.16.self_attn.v_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.16.self_attn.o_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.16.mlp
+  model.paligemma_with_expert.gemma_expert.model.layers.16.mlp.gate_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.16.mlp.up_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.16.mlp.down_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.16.mlp.act_fn
+  model.paligemma_with_expert.gemma_expert.model.layers.16.input_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.16.post_attention_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.17
+  model.paligemma_with_expert.gemma_expert.model.layers.17.self_attn
+  model.paligemma_with_expert.gemma_expert.model.layers.17.self_attn.q_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.17.self_attn.k_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.17.self_attn.v_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.17.self_attn.o_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.17.mlp
+  model.paligemma_with_expert.gemma_expert.model.layers.17.mlp.gate_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.17.mlp.up_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.17.mlp.down_proj
+  model.paligemma_with_expert.gemma_expert.model.layers.17.mlp.act_fn
+  model.paligemma_with_expert.gemma_expert.model.layers.17.input_layernorm
+  model.paligemma_with_expert.gemma_expert.model.layers.17.post_attention_layernorm
+  model.paligemma_with_expert.gemma_expert.model.norm
+  model.paligemma_with_expert.gemma_expert.model.rotary_emb
+  model.paligemma_with_expert.gemma_expert.lm_head
+  model.state_proj
+  model.action_in_proj
+  model.action_out_proj
+  model.action_time_mlp_in
+  model.action_time_mlp_out
