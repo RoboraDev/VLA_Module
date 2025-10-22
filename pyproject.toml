@@ -15,8 +15,6 @@ dependencies = [
     "pytest>=8.4.2",
 ]
 
-[project.scripts]
-vla-cli = "vla_module.cli.main:main"
 
 [project.optional-dependencies]
 dev = [
@@ -28,14 +26,14 @@ dev = [
 ]
 
 [tool.uv]
-package = true
+package = false
 
-[tool.setuptools]
-packages = ["vla_module"]
+#[tool.setuptools]
+#packages = ["vla_module"]
 
-[tool.setuptools.package-data]
-"*" = ["*.yaml", "*.yml", "*.json"]
+#[tool.setuptools.package-data]
+#"*" = ["*.yaml", "*.yml", "*.json"]
 
-[build-system]
-requires = ["setuptools>=45", "wheel"]
-build-backend = "setuptools.build_meta"
+#[build-system]
+#requires = ["setuptools>=45", "wheel"]
+#build-backend = "setuptools.build_meta"
