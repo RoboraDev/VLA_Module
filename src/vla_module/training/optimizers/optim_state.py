@@ -4,8 +4,7 @@ import torch
 from safetensors.torch import load_file, save_file
 
 # TODO (Shiven) Modularize it properly for importing via init dunder.
-from ..utils import flatten_dict, unflatten_dict, write_json
-from ..utils import deserialize_json_into_object
+from ...utils.io_utils import flatten_dict, unflatten_dict, write_json, deserialize_json_into_object
 
 # Constants
 OPTIMIZER_STATE = "optimizer_state.safetensors"
