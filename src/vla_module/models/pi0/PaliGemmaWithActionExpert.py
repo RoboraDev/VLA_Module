@@ -104,4 +104,11 @@ class PaliGemmaWithActionExpert(
             if any(selector in name for selector in params_to_keep_float32):
                 param.data = param.data.to(dtype=torch.float32)
 
+    ## Got these features abstracted from transformers library.
+    # Will be used later on to convert image to embeddings.
+    def embed_image(self, image: torch.Tensor):
+        return self.paligemma.model.get_image_features(image)
 
+    # Will be used later on to convert language tokens to embeddings.
+    def embed_language_tokens(self, tokens: torch.Tensor):
+        return self.paligemma.language_model.embed_tokens(tokens)
