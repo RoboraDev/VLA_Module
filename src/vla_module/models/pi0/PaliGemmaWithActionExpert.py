@@ -77,5 +77,31 @@ class PaliGemmaWithActionExpert(
         self.gemma_expert = GemmaForCausalLM(config=action_expert_config_hf)
         self.gemma_expert.model.embed_tokens = None
 
+        self._to_bfloat16_for_selected_params(precision)
+
+    # helper method to convert precision of selected parameters, though keeping some in original float32
+    def _to_bfloat16_for_selected_params(self, precision: Literal["bfloat16", "float32"] = "bfloat16"):
+
+        if precision == "bfloat16":
+            self.to(dtype=torch.bfloat16)
+        elif precision == "float32":
+            self.to(dtype=torch.float32)
+            return
+        else:
+            raise ValueError(f"Invalid precision: {precision}")
+
+        # These are the parameters that should be kept in float32
+        params_to_keep_float32 = [
+            "vision_tower.vision_model.embeddings.patch_embedding.weight",
+            "vision_tower.vision_model.embeddings.patch_embedding.bias",
+            "vision_tower.vision_model.embeddings.position_embedding.weight",
+            "input_layernorm",
+            "post_attention_layernorm",
+            "model.norm",
+        ]
+
+        for name, param in self.named_parameters():
+            if any(selector in name for selector in params_to_keep_float32):
+                param.data = param.data.to(dtype=torch.float32)
 
 
