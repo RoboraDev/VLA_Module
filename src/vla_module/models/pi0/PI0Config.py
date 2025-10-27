@@ -77,8 +77,8 @@ _vision_config = CONFIG_MAPPING["siglip_vision_model"](
 vlm_config = CONFIG_MAPPING["paligemma"](
     _vocab_size = 257152,  # noqa: SLF001
     image_token_index = 257152,
-    text_config = _text_config_hf,
-    vision_config = _vision_config_hf,
+    text_config = _text_config,
+    vision_config = _vision_config,
 )
 
 
