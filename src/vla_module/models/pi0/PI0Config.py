@@ -9,6 +9,7 @@ This file act as a Single source of truth for any config, hyperparameters etc PI
 import torch
 from torch import nn
 from transformers.models.auto import CONFIG_MAPPING
+from dataclasses import dataclass
 from transformers.models.gemma import modeling_gemma
 from transformers import (
     PaliGemmaForConditionalGeneration,
@@ -95,3 +96,41 @@ action_expert_config = CONFIG_MAPPING["gemma"](
     use_adarms=use_adarms[1],
     adarms_cond_dim=gemma_expert.width if use_adarms[1] else None,
 )
+
+@dataclass
+class PI0Config:
+    """Simplified PI0 Configuration containing only properties used in PI0Pytorch."""
+
+    # Model precision
+    dtype: str = "float32"  # Options: "bfloat16", "float32"
+
+    # Dimension configuration
+    max_action_dim: int = 32  # Maximum action vector dimension (with padding)
+    max_state_dim: int = 32  # Maximum state vector dimension (with padding)
+    chunk_size: int = 50  # Number of action steps to predict (action_horizon)
+
+    # Flow matching parameters for denoising
+    num_inference_steps: int = 10  # Number of denoising steps during inference
+    min_period: float = 4e-3  # Minimum period for sinusoidal timestep encoding
+    max_period: float = 4.0  # Maximum period for sinusoidal timestep encoding
+
+    # Model optimization
+    compile_model: bool = False  # Whether to use torch.compile
+    compile_mode: str = "max-autotune"  # Torch compile mode
+
+    def __post_init__(self):
+        """Validate configuration after initialization."""
+        if self.dtype not in ["bfloat16", "float32"]:
+            raise ValueError(f"Invalid dtype: {self.dtype}. Must be 'bfloat16' or 'float32'")
+
+        if self.max_action_dim <= 0:
+            raise ValueError(f"max_action_dim must be positive, got {self.max_action_dim}")
+
+        if self.max_state_dim <= 0:
+            raise ValueError(f"max_state_dim must be positive, got {self.max_state_dim}")
+
+        if self.chunk_size <= 0:
+            raise ValueError(f"chunk_size must be positive, got {self.chunk_size}")
+
+        if self.num_inference_steps <= 0:
+            raise ValueError(f"num_inference_steps must be positive, got {self.num_inference_steps}")
