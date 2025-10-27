@@ -1,4 +1,4 @@
-import torch
+import torch, logging
 
 def get_device():
     """
@@ -23,6 +23,29 @@ def get_device():
     else:
         # Fallback to CPU
         return "cpu"
+
+def get_device_torch() -> torch.device:
+    """Tries to select automatically a torch device."""
+    if torch.cuda.is_available():
+        logging.info("Cuda backend detected, using cuda.")
+        return torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        logging.info("Metal backend detected, using mps.")
+        return torch.device("mps")
+    else:
+        logging.warning("No accelerated backend detected. Using default cpu, this will be slow.")
+        return torch.device("cpu")
+
+def is_torch_device_available(try_device: str) -> bool:
+    try_device = str(try_device)  # Ensure try_device is a string
+    if try_device == "cuda":
+        return torch.cuda.is_available()
+    elif try_device == "mps":
+        return torch.backends.mps.is_available()
+    elif try_device == "cpu":
+        return True
+    else:
+        raise ValueError(f"Unknown device {try_device}. Supported devices are: cuda, mps or cpu.")
 
 def get_device_info():
     """
