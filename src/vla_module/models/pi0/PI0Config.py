@@ -10,6 +10,7 @@ import torch
 from torch import nn
 from transformers.models.auto import CONFIG_MAPPING
 from dataclasses import dataclass
+from typing import Literal
 from transformers.models.gemma import modeling_gemma
 from transformers import (
     PaliGemmaForConditionalGeneration,
@@ -102,7 +103,7 @@ class PI0Config:
     """Simplified PI0 Configuration containing only properties used in PI0Pytorch."""
 
     # Model precision
-    dtype: str = "float32"  # Options: "bfloat16", "float32"
+    dtype: Literal["bfloat16", "float32"] = "float32"
 
     # Dimension configuration
     max_action_dim: int = 32  # Maximum action vector dimension (with padding)
@@ -134,3 +135,5 @@ class PI0Config:
 
         if self.num_inference_steps <= 0:
             raise ValueError(f"num_inference_steps must be positive, got {self.num_inference_steps}")
+
+OPENPI_ATTENTION_MASK_VALUE = -2.3819763e38

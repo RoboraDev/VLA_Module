@@ -1,7 +1,12 @@
 import torch
+import math
 from torch import nn
+from torch import Tensor
+
 from PaliGemmaWithActionExpert import PaliGemmaWithActionExpert
 from .PI0Config import vlm_config, action_expert_config
+from .PI0Config import PI0Config, OPENPI_ATTENTION_MASK_VALUE
+
 
 class PI0Pytorch(nn.Module):
     """Core PI0 PyTorch model - Inference Only."""
@@ -29,16 +34,6 @@ class PI0Pytorch(nn.Module):
         if config.compile_model:
             torch.set_float32_matmul_precision("high")
             self.sample_actions = torch.compile(self.sample_actions, mode=config.compile_mode)
-
-        msg = """An incorrect transformer version is used, please create an issue on https://github.com/huggingface/lerobot/issues"""
-
-        try:
-            from transformers.models.siglip import check
-
-            if not check.check_whether_transformers_replace_is_installed_correctly():
-                raise ValueError(msg)
-        except ImportError:
-            raise ValueError(msg) from None
 
     def _prepare_attention_masks_4d(self, att_2d_masks):
         """Helper method to prepare 4D attention masks for transformer."""
