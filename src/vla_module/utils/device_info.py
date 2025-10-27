@@ -78,6 +78,21 @@ def get_device_info():
     
     return info
 
+def get_safe_dtype(target_dtype, device_type):
+
+    """Get a safe dtype for the given device type."""
+    if device_type == "mps" and target_dtype == torch.float64:
+        return torch.float32
+    if device_type == "cpu":
+
+        # CPU doesn't support bfloat16, this is the only reason this function is required.
+        if target_dtype == torch.bfloat16:
+            return torch.float32
+        if target_dtype == torch.float64:
+            return torch.float64
+
+    return target_dtype
+
 if __name__ == "__main__":
     
     # Added, just so I can test it out single as well.

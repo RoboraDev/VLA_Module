@@ -6,6 +6,7 @@ from torch import Tensor
 from PaliGemmaWithActionExpert import PaliGemmaWithActionExpert
 from .PI0Config import vlm_config, action_expert_config
 from .PI0Config import PI0Config, OPENPI_ATTENTION_MASK_VALUE
+from .helpers import make_att_2d_masks, create_sinusoidal_pos_embedding
 
 
 class PI0Pytorch(nn.Module):
@@ -172,7 +173,7 @@ class PI0Pytorch(nn.Module):
         _, past_key_values = self.paligemma_with_expert.forward(
             attention_mask=prefix_att_2d_masks_4d,
             position_ids=prefix_position_ids,
-            past_key_values=None,
+            past_kv=None,
             inputs_embeds=[prefix_embs, None],
             use_cache=True,
         )
@@ -224,7 +225,7 @@ class PI0Pytorch(nn.Module):
         outputs_embeds, _ = self.paligemma_with_expert.forward(
             attention_mask=full_att_2d_masks_4d,
             position_ids=position_ids,
-            past_key_values=past_key_values,
+            past_kv=past_key_values,
             inputs_embeds=[None, suffix_embs],
             use_cache=False,
             adarms_cond=[None, adarms_cond],
