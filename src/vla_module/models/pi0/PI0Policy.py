@@ -1,12 +1,28 @@
 import torch
-import math
+import builtins
+import logging
+import math, json
 from torch import nn
 from torch import Tensor
+from pathlib import Path
+from safetensors.torch import load_file
+from typing import TypedDict, TypeVar, Self
+from abc import ABC, abstractmethod
 
 from PaliGemmaWithActionExpert import PaliGemmaWithActionExpert
 from .PI0Config import vlm_config, action_expert_config
-from .PI0Config import PI0Config, OPENPI_ATTENTION_MASK_VALUE
-from .helpers import make_att_2d_masks, create_sinusoidal_pos_embedding
+from .PI0Config import PI0Config, OPENPI_ATTENTION_MASK_VALUE, image_resolution
+from .helpers import make_att_2d_masks, create_sinusoidal_pos_embedding, pad_vector, resize_with_pad_torch
+
+OBS_STR = "observation"
+OBS_PREFIX = OBS_STR + "."
+OBS_ENV_STATE = OBS_STR + ".environment_state"
+OBS_STATE = OBS_STR + ".state"
+OBS_IMAGE = OBS_STR + ".image"
+OBS_IMAGES = OBS_IMAGE + "s"
+OBS_LANGUAGE = OBS_STR + ".language"
+OBS_LANGUAGE_TOKENS = OBS_LANGUAGE + ".tokens"
+OBS_LANGUAGE_ATTENTION_MASK = OBS_LANGUAGE + ".attention_mask"
 
 
 class PI0Pytorch(nn.Module):
@@ -235,3 +251,350 @@ class PI0Pytorch(nn.Module):
         suffix_out = suffix_out[:, -self.config.chunk_size:]
         suffix_out = suffix_out.to(dtype=torch.float32)
         return self.action_out_proj(suffix_out)
+
+    class PI0Policy(nn.Module):
+        """PI0 Policy - standalone implementation without PreTrainedPolicy."""
+
+        config_class = PI0Config
+        name = "pi0"
+
+        def __init__(self, config: PI0Config, **kwargs):
+            super().__init__()
+            self.config = config
+
+            # Initialize the core PI0 model
+            self.model = PI0Pytorch(config)
+
+            # Enable gradient checkpointing if requested
+            if config.gradient_checkpointing:
+                self.model.gradient_checkpointing_enable()
+
+            self.model.to(config.device)
+            self.reset()
+
+        def save_pretrained(self, save_directory: str | Path) -> None:
+            """Save model weights and config."""
+            save_directory = Path(save_directory)
+            save_directory.mkdir(parents=True, exist_ok=True)
+
+            # Save config
+            config_path = save_directory / "config.json"
+            with open(config_path, "w") as f:
+                # Convert dataclass to dict and save
+                import dataclasses
+                config_dict = dataclasses.asdict(self.config)
+                # Handle device serialization
+                if isinstance(config_dict.get('device'), torch.device):
+                    config_dict['device'] = str(config_dict['device'])
+                json.dump(config_dict, f, indent=4)
+
+            # Save model weights
+            model_to_save = self.module if hasattr(self, "module") else self
+            from safetensors.torch import save_file
+            state_dict = model_to_save.state_dict()
+            save_file(state_dict, str(save_directory / "model.safetensors"))
+
+            print(f"Model saved to {save_directory}")
+
+        @classmethod
+        def load_stored_weights(
+                cls,
+                weights_file: str | Path = "model.safetensors",
+                config_file: str | Path | None = None,
+                config: PI0Config | None = None,
+                strict: bool = False,
+        ) -> Self:
+            """
+            Load model weights from a local safetensors file and return a model instance.
+
+            Args:
+                weights_file: Path to the safetensors file (e.g., "model.safetensors" or "/path/to/model.safetensors")
+                config_file: Optional path to config.json file. If None, looks for config.json in same directory as weights_file
+                config: Optional PI0Config instance. If provided, uses this instead of loading from file
+                strict: Whether to strictly enforce state dict key matching
+
+            Returns:
+                PI0Policy instance with loaded weights
+
+            Example:
+                # Load from same directory
+                policy = PI0Policy.load_stored_weights("model.safetensors")
+
+                # Load from specific path
+                policy = PI0Policy.load_stored_weights("/path/to/model.safetensors")
+
+                # Load with custom config
+                config = PI0Config(device="cuda", chunk_size=50)
+                policy = PI0Policy.load_stored_weights("model.safetensors", config=config)
+            """
+            weights_path = Path(weights_file)
+            if not weights_path.exists():
+                raise FileNotFoundError(f"Weights file not found: {weights_path}")
+
+            # Load or use provided config
+            if config is None:
+                # Determine config file path
+                if config_file is None:
+                    # Look for config.json in same directory as weights file
+                    config_path = weights_path.parent / "config.json"
+                else:
+                    config_path = Path(config_file)
+
+                if not config_path.exists():
+                    raise FileNotFoundError(
+                        f"Config file not found: {config_path}. "
+                        f"Please provide a config file or pass a PI0Config instance."
+                    )
+
+                print(f"Loading config from: {config_path}")
+                with open(config_path, "r") as f:
+                    config_dict = json.load(f)
+                    # Handle device deserialization
+                    if 'device' in config_dict:
+                        config_dict['device'] = torch.device(config_dict['device'])
+                    config = PI0Config(**config_dict)
+
+            # Create instance
+            print(f"Creating PI0Policy instance with config...")
+            instance = cls(config)
+
+            # Load weights
+            print(f"Loading weights from: {weights_path}")
+            from safetensors.torch import load_file
+            original_state_dict = load_file(str(weights_path))
+
+            # Fix any key differences
+            fixed_state_dict = instance._fix_pytorch_state_dict_keys(original_state_dict, None)
+
+            # Remap keys: add "model." prefix if not present
+            remapped_state_dict = {}
+            remap_count = 0
+
+            for key, value in fixed_state_dict.items():
+                if not key.startswith("model."):
+                    new_key = f"model.{key}"
+                    remapped_state_dict[new_key] = value
+                    remap_count += 1
+                else:
+                    remapped_state_dict[key] = value
+
+            if remap_count > 0:
+                print(f"✓ Remapped {remap_count} keys with 'model.' prefix")
+
+            # Load state dict into the inner model
+            missing_keys, unexpected_keys = instance.model.load_state_dict(
+                remapped_state_dict,
+                strict=strict
+            )
+
+            # Report loading status
+            if missing_keys:
+                print(f"⚠ Missing {len(missing_keys)} keys")
+                for key in missing_keys[:3]:
+                    print(f"  - {key}")
+                if len(missing_keys) > 3:
+                    print(f"  ... and {len(missing_keys) - 3} more")
+
+            if unexpected_keys:
+                print(f"⚠ Unexpected {len(unexpected_keys)} keys")
+                for key in unexpected_keys[:3]:
+                    print(f"  - {key}")
+                if len(unexpected_keys) > 3:
+                    print(f"  ... and {len(unexpected_keys) - 3} more")
+
+            if not missing_keys and not unexpected_keys:
+                print("✓ All keys loaded successfully!")
+
+            # Move to device and set to eval mode
+            instance.model.to(config.device)
+            instance.eval()
+
+            print(f"✓ Model loaded and ready on device: {config.device}")
+            return instance
+
+        def _fix_pytorch_state_dict_keys(self, state_dict, model_config):
+            """Fix state dict keys to match current model architecture."""
+            import re
+
+            fixed_state_dict = {}
+
+            for key, value in state_dict.items():
+                new_key = key
+
+                # Handle layer norm structure changes
+                if re.match(
+                        r"paligemma_with_expert\.gemma_expert\.model\.layers\.\d+\.(input_layernorm|post_attention_layernorm)\.weight",
+                        key,
+                ):
+                    expert_uses_adarms = getattr(
+                        self.model.paligemma_with_expert.gemma_expert.config, "use_adarms", False
+                    )
+                    if expert_uses_adarms:
+                        logging.warning(f"Skipping layer norm key (adaRMS mismatch): {key}")
+                        continue
+
+                if re.match(r"paligemma_with_expert\.gemma_expert\.model\.norm\.weight", key):
+                    expert_uses_adarms = getattr(
+                        self.model.paligemma_with_expert.gemma_expert.config, "use_adarms", False
+                    )
+                    if expert_uses_adarms:
+                        logging.warning(f"Skipping norm key (adaRMS mismatch): {key}")
+                        continue
+
+                # Handle MLP naming changes
+                if key.startswith("time_mlp_in."):
+                    new_key = key.replace("time_mlp_in.", "action_time_mlp_in.")
+                elif key.startswith("time_mlp_out."):
+                    new_key = key.replace("time_mlp_out.", "action_time_mlp_out.")
+
+                if "patch_embedding" in key:
+                    logging.warning(f"Vision embedding key might need handling: {key}")
+
+                fixed_state_dict[new_key] = value
+
+            return fixed_state_dict
+
+        def get_optim_params(self) -> dict:
+            """Returns parameters for optimizer."""
+            return self.model().parameters()
+
+        def reset(self):
+            """Reset internal state - called when environment resets."""
+            from collections import deque
+            self._action_queue = deque(maxlen=self.config.chunk_size)
+            self._queues = {
+                "action": deque(maxlen=self.config.chunk_size),
+            }
+
+
+        def _preprocess_images(self, batch: dict[str, Tensor]) -> tuple[list[Tensor], list[Tensor]]:
+            """Preprocess images for the model.
+
+            Images from LeRobotDataset are typically in [B, C, H, W] format and normalized to [0, 1].
+            PaliGemma VLM expects images in [B, C, H, W] format and normalized to [-1, 1].
+            """
+            images = []
+            img_masks = []
+
+            # Get device from model parameters
+            device = next(self.parameters()).device
+
+            present_img_keys = [key for key in self.config.image_features if key in batch]
+            missing_img_keys = [key for key in self.config.image_features if key not in batch]
+
+            if len(present_img_keys) == 0:
+                raise ValueError(
+                    f"All image features are missing from the batch. At least one expected. "
+                    f"(batch: {batch.keys()}) (image_features: {self.config.image_features})"
+                )
+
+            for key in present_img_keys:
+                img = batch[key]
+
+                # Ensure tensor is on the same device as the model
+                if img.device != device:
+                    img = img.to(device)
+
+                # Ensure float32 dtype for consistency
+                if img.dtype != torch.float32:
+                    img = img.to(torch.float32)
+
+                # from openpi preprocess_observation_pytorch: Handle both [B, C, H, W] and [B, H, W, C] formats
+                is_channels_first = img.shape[1] == 3  # Check if channels are in dimension 1
+
+                if is_channels_first:
+                    # Convert [B, C, H, W] to [B, H, W, C] for processing
+                    img = img.permute(0, 2, 3, 1)
+
+                # from openpi preprocess_observation_pytorch: Resize with padding if needed
+                if img.shape[1:3] != self.config.image_resolution:
+                    img = resize_with_pad_torch(img, *self.config.image_resolution)
+
+                # Normalize from [0,1] to [-1,1] as expected by siglip
+                img = img * 2.0 - 1.0
+
+                # from openpi preprocess_observation_pytorch: Convert back to [B, C, H, W] format if it was originally channels-first
+                if is_channels_first:
+                    img = img.permute(0, 3, 1, 2)  # [B, H, W, C] -> [B, C, H, W]
+
+                images.append(img)
+                # Create mask (all ones for real images)
+                bsize = img.shape[0]
+                mask = torch.ones(bsize, dtype=torch.bool, device=device)
+                img_masks.append(mask)
+
+            # Create image features not present in the batch as fully 0 padded images
+            for _num_empty_cameras in range(len(missing_img_keys)):
+                img = torch.ones_like(img) * -1  # padded with -1 for SigLIP
+                mask = torch.zeros_like(mask)  # mask is zero for empty cameras
+                images.append(img)
+                img_masks.append(mask)
+
+            return images, img_masks
+
+        def prepare_state(self, batch):
+            """Pad state"""
+            state = pad_vector(batch[OBS_STATE], self.config.max_state_dim)
+            return state
+
+        def prepare_action(self, batch):
+            """Pad action"""
+            actions = pad_vector(batch["ACTION"], self.config.max_action_dim)
+            return actions
+
+        @torch.no_grad()
+        def select_action(self, batch: dict[str, Tensor]) -> Tensor:
+            """Select a single action given environment observations."""
+            self.eval()
+
+            # Action queue logic for n_action_steps > 1
+            if len(self._action_queue) == 0:
+                actions = self.predict_action_chunk(batch)[:, : self.config.n_action_steps]
+                # Transpose to get shape (n_action_steps, batch_size, action_dim)
+                self._action_queue.extend(actions.transpose(0, 1))
+
+            return self._action_queue.popleft()
+
+        @torch.no_grad()
+        def predict_action_chunk(self, batch: dict[str, Tensor]) -> Tensor:
+            """Predict a chunk of actions given environment observations."""
+            self.eval()
+
+            # Prepare inputs
+            images, img_masks = self._preprocess_images(batch)
+            lang_tokens, lang_masks = batch[f"{OBS_LANGUAGE_TOKENS}"], batch[f"{OBS_LANGUAGE_ATTENTION_MASK}"]
+            state = self.prepare_state(batch)
+
+            # Sample actions using the model
+            actions = self.model.sample_actions(images, img_masks, lang_tokens, lang_masks, state)
+
+            # Unpad actions to actual action dimension
+            original_action_dim = self.config.output_features["ACTION"].shape[0]
+            actions = actions[:, :, :original_action_dim]
+
+            return actions
+
+        def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
+            """Run the batch through the model and compute the loss for training."""
+
+            # Prepare inputs
+            images, img_masks = self._preprocess_images(batch)
+            lang_tokens, lang_masks = batch[f"{OBS_LANGUAGE_TOKENS}"], batch[f"{OBS_LANGUAGE_ATTENTION_MASK}"]
+            state = self.prepare_state(batch)
+            actions = self.prepare_action(batch)
+
+            # Compute loss
+            losses = self.model.forward(images, img_masks, lang_tokens, lang_masks, state, actions)
+
+            # Truncate losses to actual action dimensions
+            original_action_dim = self.config.output_features["ACTION"].shape[0]
+            losses = losses[:, :, :original_action_dim]
+
+            loss = losses.mean()
+
+            loss_dict = {
+                "loss": loss.item(),
+                "loss_per_dim": losses.mean(dim=[0, 1]).detach().cpu().numpy().tolist(),
+            }
+
+            return loss, loss_dict
