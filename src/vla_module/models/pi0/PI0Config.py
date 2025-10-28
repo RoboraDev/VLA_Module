@@ -202,7 +202,7 @@ class PolicyFeature:
 class PI0Config:
 
     paligemma_variant: str = "gemma_language"
-    action_expert_variant: str = "gemma_expert"
+    action_expert_variant: str = "gemma_action"
     dtype: str = "float32"  # Options: "bfloat16", "float32"
 
     n_obs_steps: int = 1
@@ -267,14 +267,17 @@ class PI0Config:
                 f"n_action_steps ({self.n_action_steps}) cannot be greater than chunk_size ({self.chunk_size})"
             )
 
-        if self.paligemma_variant not in ["gemma_300m", "gemma_2b"]:
+        if self.paligemma_variant not in ["gemma_language", "gemma_300m", "gemma_2b"]:
             raise ValueError(f"Invalid paligemma_variant: {self.paligemma_variant}")
 
-        if self.action_expert_variant not in ["gemma_300m", "gemma_2b"]:
+        if self.action_expert_variant not in ["gemma_action", "gemma_300m", "gemma_2b"]:
             raise ValueError(f"Invalid action_expert_variant: {self.action_expert_variant}")
 
         if self.dtype not in ["bfloat16", "float32"]:
             raise ValueError(f"Invalid dtype: {self.dtype}")
+
+        # Ensure feature specs are populated for downstream modules
+        self.validate_features()
 
     def validate_features(self) -> None:
         """Validate and set up input/output features."""

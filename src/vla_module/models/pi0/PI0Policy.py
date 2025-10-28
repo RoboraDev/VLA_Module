@@ -108,7 +108,7 @@ class PI0Pytorch(nn.Module):
 
         embs = torch.cat(embs, dim=1)
         pad_masks = torch.cat(pad_masks, dim=1)
-        att_masks = torch.tensor(att_masks, dtype=torch.bool, device=pad_masks.device)
+        att_masks = torch.tensor(att_masks, dtype=torch.int32, device=pad_masks.device)
 
         bsize = pad_masks.shape[0]
         att_masks = att_masks[None, :].expand(bsize, len(att_masks))
@@ -163,10 +163,19 @@ class PI0Pytorch(nn.Module):
 
         embs = torch.cat(embs, dim=1)
         pad_masks = torch.cat(pad_masks, dim=1)
-        att_masks = torch.tensor(att_masks, dtype=embs.dtype, device=embs.device)
+        att_masks = torch.tensor(att_masks, dtype=torch.int32, device=embs.device)
         att_masks = att_masks[None, :].expand(bsize, len(att_masks))
 
         return embs, pad_masks, att_masks, adarms_cond
+
+    def gradient_checkpointing_enable(self) -> None:
+        """Enable gradient checkpointing on underlying transformer modules."""
+        for module in (
+            self.paligemma_with_expert.paligemma,
+            self.paligemma_with_expert.gemma_expert,
+        ):
+            if hasattr(module, "gradient_checkpointing_enable"):
+                module.gradient_checkpointing_enable()
 
     @torch.no_grad()
     def sample_actions(
@@ -273,6 +282,9 @@ class PI0Policy(nn.Module):
         def __init__(self, config: PI0Config, **kwargs):
             super().__init__()
             self.config = config
+
+            # Ensure config-derived feature specs are populated for downstream lookups
+            self.config.validate_features()
 
             # Initialize the core PI0 model
             self.model = PI0Pytorch(config)
@@ -468,7 +480,7 @@ class PI0Policy(nn.Module):
 
         def get_optim_params(self) -> dict:
             """Returns parameters for optimizer."""
-            return self.model().parameters()
+            return self.model.parameters()
 
         def reset(self):
             """Reset internal state - called when environment resets."""
@@ -551,7 +563,17 @@ class PI0Policy(nn.Module):
 
         def prepare_action(self, batch):
             """Pad action"""
-            actions = pad_vector(batch["ACTION"], self.config.max_action_dim)
+            action_key = "action"
+            if action_key not in batch:
+                legacy_key = action_key.upper()
+                if legacy_key in batch:
+                    action_key = legacy_key
+                else:
+                    raise KeyError(
+                        f"Action key '{action_key}' not found in batch (tried '{legacy_key}' as well)."
+                    )
+
+            actions = pad_vector(batch[action_key], self.config.max_action_dim)
             return actions
 
         @torch.no_grad()
@@ -581,7 +603,7 @@ class PI0Policy(nn.Module):
             actions = self.model.sample_actions(images, img_masks, lang_tokens, lang_masks, state)
 
             # Unpad actions to actual action dimension
-            original_action_dim = self.config.output_features["ACTION"].shape[0]
+            original_action_dim = self.config.output_features["action"].shape[0]
             actions = actions[:, :, :original_action_dim]
 
             return actions
@@ -599,7 +621,7 @@ class PI0Policy(nn.Module):
             losses = self.model.forward(images, img_masks, lang_tokens, lang_masks, state, actions)
 
             # Truncate losses to actual action dimensions
-            original_action_dim = self.config.output_features["ACTION"].shape[0]
+            original_action_dim = self.config.output_features["action"].shape[0]
             losses = losses[:, :, :original_action_dim]
 
             loss = losses.mean()
