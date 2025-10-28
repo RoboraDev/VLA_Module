@@ -115,6 +115,53 @@ class PI0Pytorch(nn.Module):
 
         return embs, pad_masks, att_masks
 
+    def _prepare_prefix_context(self, images, img_masks, lang_tokens, lang_masks):
+        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
+            images, img_masks, lang_tokens, lang_masks
+        )
+        prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
+        prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
+
+        prefix_att_2d_masks_4d = self._prepare_attention_masks_4d(prefix_att_2d_masks)
+        self.paligemma_with_expert.paligemma.language_model.config._attn_implementation = "eager"
+
+        _, past_key_values = self.paligemma_with_expert.forward(
+            attention_mask=prefix_att_2d_masks_4d,
+            position_ids=prefix_position_ids,
+            past_kv=None,
+            inputs_embeds=[prefix_embs, None],
+            use_cache=True,
+        )
+
+        return prefix_pad_masks, past_key_values
+
+    def _run_denoising_loop(
+            self,
+            state,
+            prefix_pad_masks,
+            past_key_values,
+            x_t,
+            num_steps,
+    ) -> torch.Tensor:
+        dt = -1.0 / num_steps
+        device = x_t.device
+        time = torch.tensor(1.0, dtype=torch.float32, device=device)
+        bsize = state.shape[0]
+
+        while time >= -dt / 2:
+            expanded_time = time.expand(bsize)
+            v_t = self.denoise_step(
+                state,
+                prefix_pad_masks,
+                past_key_values,
+                x_t,
+                expanded_time,
+            )
+            x_t = x_t + dt * v_t
+            time += dt
+
+        return x_t
+
     def embed_suffix(self, state, noisy_actions, timestep):
         """Embed state, noisy_actions, timestep to prepare for Expert Gemma processing."""
         embs = []
@@ -197,41 +244,57 @@ class PI0Pytorch(nn.Module):
             )
             noise = self.sample_noise(actions_shape, device)
 
-        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
+        prefix_pad_masks, past_key_values = self._prepare_prefix_context(
             images, img_masks, lang_tokens, lang_masks
         )
-        prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
-        prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
 
-        prefix_att_2d_masks_4d = self._prepare_attention_masks_4d(prefix_att_2d_masks)
-        self.paligemma_with_expert.paligemma.language_model.config._attn_implementation = "eager"
-
-        _, past_key_values = self.paligemma_with_expert.forward(
-            attention_mask=prefix_att_2d_masks_4d,
-            position_ids=prefix_position_ids,
-            past_kv=None,
-            inputs_embeds=[prefix_embs, None],
-            use_cache=True,
+        x_t = self._run_denoising_loop(
+            state,
+            prefix_pad_masks,
+            past_key_values,
+            noise,
+            num_steps,
         )
 
-        dt = -1.0 / num_steps
-        dt = torch.tensor(dt, dtype=torch.float32, device=device)
-
-        x_t = noise
-        time = torch.tensor(1.0, dtype=torch.float32, device=device)
-        while time >= -dt / 2:
-            expanded_time = time.expand(bsize)
-            v_t = self.denoise_step(
-                state,
-                prefix_pad_masks,
-                past_key_values,
-                x_t,
-                expanded_time,
-            )
-            x_t = x_t + dt * v_t
-            time += dt
-
         return x_t
+
+    def forward(
+            self,
+            images,
+            img_masks,
+            lang_tokens,
+            lang_masks,
+            state,
+            target_actions,
+            noise=None,
+            num_steps=None,
+    ) -> Tensor:
+        """Forward pass used for training.
+
+        Returns the denoised action predictions so external callers can compute
+        supervision losses (e.g., MSE against ground-truth actions).
+        """
+        if num_steps is None:
+            num_steps = self.config.num_inference_steps
+
+        device = state.device
+
+        if noise is None:
+            noise = self.sample_noise(target_actions.shape, device)
+
+        prefix_pad_masks, past_key_values = self._prepare_prefix_context(
+            images, img_masks, lang_tokens, lang_masks
+        )
+
+        preds = self._run_denoising_loop(
+            state,
+            prefix_pad_masks,
+            past_key_values,
+            noise,
+            num_steps,
+        )
+
+        return preds
 
     def denoise_step(
             self,
@@ -599,6 +662,17 @@ class PI0Policy(nn.Module):
                     )
 
             actions = pad_vector(batch[action_key], self.config.max_action_dim)
+
+            if actions.ndim == 2:
+                actions = actions.unsqueeze(1).repeat(1, self.config.chunk_size, 1)
+            elif actions.ndim == 3:
+                if actions.shape[1] < self.config.chunk_size:
+                    pad_amount = self.config.chunk_size - actions.shape[1]
+                    pad_tensor = actions[:, -1:, :].repeat(1, pad_amount, 1)
+                    actions = torch.cat([actions, pad_tensor], dim=1)
+                elif actions.shape[1] > self.config.chunk_size:
+                    actions = actions[:, : self.config.chunk_size]
+
             return actions
 
         @torch.no_grad()
@@ -642,18 +716,33 @@ class PI0Policy(nn.Module):
             state = self.prepare_state(batch)
             actions = self.prepare_action(batch)
 
-            # Compute loss
-            losses = self.model.forward(images, img_masks, lang_tokens, lang_masks, state, actions)
+            # Run forward pass to obtain predicted actions
+            pred_actions = self.model.forward(
+                images,
+                img_masks,
+                lang_tokens,
+                lang_masks,
+                state,
+                actions,
+            )
 
-            # Truncate losses to actual action dimensions
+            # Truncate tensors to actual action dimensions
             original_action_dim = self.config.output_features["action"].shape[0]
-            losses = losses[:, :, :original_action_dim]
+            pred_actions = pred_actions[:, :, :original_action_dim]
+            target_actions = actions[:, :, :original_action_dim]
 
-            loss = losses.mean()
+            mse_losses = F.mse_loss(pred_actions, target_actions, reduction="none")
+            loss = mse_losses.mean()
+
+            mae = torch.mean(torch.abs(pred_actions - target_actions)).item()
+            l2 = torch.sqrt(torch.mean((pred_actions - target_actions) ** 2)).item()
 
             loss_dict = {
                 "loss": loss.item(),
-                "loss_per_dim": losses.mean(dim=[0, 1]).detach().cpu().numpy().tolist(),
+                "mse": loss.item(),
+                "mae": mae,
+                "l2": l2,
+                "loss_per_dim": mse_losses.mean(dim=[0, 1]).detach().cpu().numpy().tolist(),
             }
 
             return loss, loss_dict
