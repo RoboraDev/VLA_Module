@@ -103,6 +103,14 @@ class PaliGemmaWithActionExpert(
         # look into it if that's necessary or not.
 
         self.paligemma = PaliGemmaForConditionalGeneration(config=vlm_config)
+        # The pretrained checkpoints typically omit the SigLIP classification head.
+        # Replace it with an identity module (when present) so the state dict
+        # matches and avoids missing parameters during load.
+        vision_tower = getattr(self.paligemma, "vision_tower", None)
+        if vision_tower is not None:
+            vision_model = getattr(vision_tower, "vision_model", None)
+            if vision_model is not None and hasattr(vision_model, "head"):
+                vision_model.head = nn.Identity()
         self.gemma_expert = GemmaForCausalLM(config=action_expert_config)
         self.gemma_expert.model.embed_tokens = None
 
