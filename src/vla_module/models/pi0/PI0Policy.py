@@ -51,12 +51,14 @@ class PI0Pytorch(nn.Module):
             precision=config.dtype,
         )
 
-        self.action_in_proj = nn.Linear(config.max_action_dim, action_expert_config.width)
-        self.action_out_proj = nn.Linear(action_expert_config.width, config.max_action_dim)
+        expert_hidden_size = action_expert_config.text_config.hidden_size
 
-        self.state_proj = nn.Linear(config.max_state_dim, action_expert_config.width)
-        self.action_time_mlp_in = nn.Linear(2 * action_expert_config.width, action_expert_config.width)
-        self.action_time_mlp_out = nn.Linear(action_expert_config.width, action_expert_config.width)
+        self.action_in_proj = nn.Linear(config.max_action_dim, expert_hidden_size)
+        self.action_out_proj = nn.Linear(expert_hidden_size, config.max_action_dim)
+
+        self.state_proj = nn.Linear(config.max_state_dim, expert_hidden_size)
+        self.action_time_mlp_in = nn.Linear(2 * expert_hidden_size, expert_hidden_size)
+        self.action_time_mlp_out = nn.Linear(expert_hidden_size, expert_hidden_size)
 
         # Compile model if requested
         if config.compile_model:
@@ -283,9 +285,6 @@ class PI0Policy(nn.Module):
             super().__init__()
             self.config = config
 
-            # Ensure config-derived feature specs are populated for downstream lookups
-            self.config.validate_features()
-
             # Initialize the core PI0 model
             self.model = PI0Pytorch(config)
 
@@ -325,7 +324,7 @@ class PI0Policy(nn.Module):
                 cls,
                 weights_file: str | Path = "model.safetensors",
                 config_file: str | Path | None = None,
-                config: PI0Config | None = None,
+                config: PI0Config | None = PI0Config,
                 strict: bool = False,
         ) -> Self:
             """
