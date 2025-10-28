@@ -11,3 +11,6 @@ wheels/
 
 # Environment for credentials
 .env
+
+# Ignore local stored weights file for testing
+*.safetensors
