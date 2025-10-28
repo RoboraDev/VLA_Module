@@ -2711,6 +2711,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "rich" },
     { name = "torchvision" },
+    { name = "wandb" },
 ]
 
 [package.optional-dependencies]
@@ -2737,6 +2738,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "torchvision", specifier = "<0.23" },
+    { name = "wandb", specifier = ">=0.22.2" },
 ]
 provides-extras = ["dev"]
 
