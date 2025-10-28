@@ -77,10 +77,16 @@ _text_config = CONFIG_MAPPING["gemma"](
 
 # VLM vision tower aka siglip vision encoder
 _vision_config = CONFIG_MAPPING["siglip_vision_model"](
-    intermediate_size = 4304,
-    projection_dim = 2048,
-    projector_hidden_act = "gelu_fast",
-    torch_dtype = "float32"
+    hidden_size=1152,
+    intermediate_size=4304,
+    num_hidden_layers=27,
+    num_attention_heads=18,
+    patch_size=14,
+    image_size=224,
+    projection_dim=2048,
+    projector_hidden_act="gelu_fast",
+    torch_dtype="float32",
+    use_head=False,
 )
 
 vlm_config = CONFIG_MAPPING["paligemma"](

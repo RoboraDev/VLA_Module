@@ -42,8 +42,6 @@ class PI0Pytorch(nn.Module):
     def __init__(self, config: PI0Config):
         super().__init__()
         self.config = config
-
-
         self.paligemma_with_expert = PaliGemmaWithActionExpert(
             vlm_config,
             action_expert_config,
@@ -51,7 +49,7 @@ class PI0Pytorch(nn.Module):
             precision=config.dtype,
         )
 
-        expert_hidden_size = action_expert_config.text_config.hidden_size
+        expert_hidden_size = action_expert_config.hidden_size
 
         self.action_in_proj = nn.Linear(config.max_action_dim, expert_hidden_size)
         self.action_out_proj = nn.Linear(expert_hidden_size, config.max_action_dim)
@@ -389,24 +387,21 @@ class PI0Policy(nn.Module):
             # Fix any key differences
             fixed_state_dict = instance._fix_pytorch_state_dict_keys(original_state_dict, None)
 
-            # Remap keys: add "model." prefix if not present
-            remapped_state_dict = {}
-            remap_count = 0
+            # Normalize key prefixes to match module naming
+            from torch.nn.modules.utils import consume_prefix_in_state_dict_if_present
+            processed_state_dict = dict(fixed_state_dict)
+            stripped_prefixes = []
+            for prefix in ("model.", "module."):
+                if consume_prefix_in_state_dict_if_present(processed_state_dict, prefix):
+                    stripped_prefixes.append(prefix)
 
-            for key, value in fixed_state_dict.items():
-                if not key.startswith("model."):
-                    new_key = f"model.{key}"
-                    remapped_state_dict[new_key] = value
-                    remap_count += 1
-                else:
-                    remapped_state_dict[key] = value
-
-            if remap_count > 0:
-                print(f"✓ Remapped {remap_count} keys with 'model.' prefix")
+            if stripped_prefixes:
+                joined = ", ".join(f"'{p}'" for p in stripped_prefixes)
+                print(f"✓ Stripped prefixes {joined} from state dict keys")
 
             # Load state dict into the inner model
             missing_keys, unexpected_keys = instance.model.load_state_dict(
-                remapped_state_dict,
+                processed_state_dict,
                 strict=strict
             )
 
@@ -470,10 +465,41 @@ class PI0Policy(nn.Module):
                 elif key.startswith("time_mlp_out."):
                     new_key = key.replace("time_mlp_out.", "action_time_mlp_out.")
 
+                # Align paligemma naming between checkpoints and current architecture
+                if key.startswith("paligemma_with_expert.paligemma.model.vision_tower."):
+                    new_key = key.replace(
+                        "paligemma_with_expert.paligemma.model.vision_tower.",
+                        "paligemma_with_expert.paligemma.vision_tower.",
+                        1,
+                    )
+                elif key.startswith("paligemma_with_expert.paligemma.model.language_model."):
+                    new_key = key.replace(
+                        "paligemma_with_expert.paligemma.model.language_model.",
+                        "paligemma_with_expert.paligemma.language_model.model.",
+                        1,
+                    )
+                elif key.startswith("paligemma_with_expert.paligemma.model.multi_modal_projector."):
+                    new_key = key.replace(
+                        "paligemma_with_expert.paligemma.model.multi_modal_projector.",
+                        "paligemma_with_expert.paligemma.multi_modal_projector.",
+                        1,
+                    )
+                elif key.startswith("paligemma_with_expert.paligemma.lm_head."):
+                    new_key = key.replace(
+                        "paligemma_with_expert.paligemma.lm_head.",
+                        "paligemma_with_expert.paligemma.language_model.lm_head.",
+                        1,
+                    )
+
                 if "patch_embedding" in key:
                     logging.warning(f"Vision embedding key might need handling: {key}")
 
                 fixed_state_dict[new_key] = value
+
+            embed_tokens_key = "paligemma_with_expert.paligemma.language_model.model.embed_tokens.weight"
+            lm_head_key = "paligemma_with_expert.paligemma.language_model.lm_head.weight"
+            if embed_tokens_key not in fixed_state_dict and lm_head_key in fixed_state_dict:
+                fixed_state_dict[embed_tokens_key] = fixed_state_dict[lm_head_key]
 
             return fixed_state_dict
 
