@@ -7,8 +7,7 @@ import draccus
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR, LRScheduler
 
-from ...utils.io_utils import write_json
-from ...utils.io_utils import deserialize_json_into_object
+from vla_module.utils.io_utils import deserialize_json_into_object, write_json
 
 SCHEDULER_STATE="scheduler_state.json"
 

@@ -29,8 +29,8 @@ except ImportError:
     RICH_AVAILABLE = False
     console = None
 
-from ..config_loader import get_config_loader
-from ..models.hub import get_model_hub
+from vla_module.config_loader import get_config_loader
+from vla_module.models.hub import get_model_hub
 
 
 class VLACLIError(Exception):

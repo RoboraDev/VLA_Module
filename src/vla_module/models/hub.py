@@ -16,7 +16,7 @@ try:
 except ImportError:
     HF_HUB_AVAILABLE = False
 
-from ..config_loader import get_config_loader
+from vla_module.config_loader import get_config_loader
 
 logger = logging.getLogger(__name__)
 

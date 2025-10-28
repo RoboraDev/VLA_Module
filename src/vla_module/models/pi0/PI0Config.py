@@ -10,8 +10,8 @@ import torch
 from torch import nn
 from transformers.models.auto import CONFIG_MAPPING
 from dataclasses import dataclass, field
-from ...training.optimizers.OptimizerConfigs import AdamWConfig
-from ...training.lr_schedulers.LRSchedulerConfigs import CosineDecayWithWarmupSchedulerConfig
+from vla_module.training.optimizers.OptimizerConfigs import AdamWConfig
+from vla_module.training.lr_schedulers.LRSchedulerConfigs import CosineDecayWithWarmupSchedulerConfig
 from enum import Enum
 from typing import Literal
 from transformers.models.gemma import modeling_gemma
@@ -56,6 +56,10 @@ gemma_expert = GemmaConfig(
 
 # TODO: SHIVEN -> Need to take care of this, added just to see how much similarity I can decouple from each VLA Policy
 
+# PI0 uses AdaRMS gating in some research variants, but defaults to disabled for both branches.
+USE_ADARMS: tuple[bool, bool] = (False, False)
+OBS_IMAGES = "observation.images"
+
 # VLM Language part
 _text_config = CONFIG_MAPPING["gemma"](
     hidden_size = gemma_language.width,
@@ -67,8 +71,8 @@ _text_config = CONFIG_MAPPING["gemma"](
     hidden_activation = "gelu_pytorch_tanh",
     torch_dtype = "float32",
     vocab_size = 257152,
-    use_adarms = use_adarms[0],
-    adarms_cond_dim = gemma_language.width if use_adarms[0] else None,
+    use_adarms = USE_ADARMS[0],
+    adarms_cond_dim = gemma_language.width if USE_ADARMS[0] else None,
 )
 
 # VLM vision tower aka siglip vision encoder
@@ -97,8 +101,8 @@ action_expert_config = CONFIG_MAPPING["gemma"](
     vocab_size=257152,
     hidden_activation="gelu_pytorch_tanh",
     torch_dtype="float32",
-    use_adarms=use_adarms[1],
-    adarms_cond_dim=gemma_expert.width if use_adarms[1] else None,
+    use_adarms=USE_ADARMS[1],
+    adarms_cond_dim=gemma_expert.width if USE_ADARMS[1] else None,
 )
 
 # @dataclass
@@ -239,7 +243,7 @@ class PI0Config:
     gradient_checkpointing: bool = False  # Enable gradient checkpointing for memory optimization
     compile_model: bool = False  # Whether to use torch.compile for model optimization
     compile_mode: str = "max-autotune"  # Torch compile mode
-    device: str | None = None  # Device to use for the model (None = auto-detect)
+    device: str | None = "cpu"  # Device to use for the model (None = auto-detect)
 
     # Optimizer settings: see openpi `AdamW``
     optimizer_lr: float = 2.5e-5  # see openpi `CosineDecaySchedule: peak_lr`

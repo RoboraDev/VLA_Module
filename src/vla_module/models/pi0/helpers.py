@@ -3,7 +3,7 @@ import math
 from torch import Tensor
 import torch.nn.functional as F
 
-from ...utils.device_info import  get_safe_dtype
+from vla_module.utils.device_info import get_safe_dtype
 
 def make_att_2d_masks(pad_masks, att_masks):
     # Taken from OpenPI repository

@@ -8,11 +8,22 @@ from pathlib import Path
 from safetensors.torch import load_file
 from typing import TypedDict, TypeVar, Self
 from abc import ABC, abstractmethod
+import torch.nn.functional as F
 
-from PaliGemmaWithActionExpert import PaliGemmaWithActionExpert
-from .PI0Config import vlm_config, action_expert_config
-from .PI0Config import PI0Config, OPENPI_ATTENTION_MASK_VALUE, image_resolution
-from .helpers import make_att_2d_masks, create_sinusoidal_pos_embedding, pad_vector, resize_with_pad_torch
+from vla_module.models.pi0.PaliGemmaWithActionExpert import PaliGemmaWithActionExpert
+from vla_module.models.pi0.PI0Config import (
+    OPENPI_ATTENTION_MASK_VALUE,
+    PI0Config,
+    action_expert_config,
+    USE_ADARMS,
+    vlm_config,
+)
+from vla_module.models.pi0.helpers import (
+    create_sinusoidal_pos_embedding,
+    make_att_2d_masks,
+    pad_vector,
+    resize_with_pad_torch,
+)
 
 OBS_STR = "observation"
 OBS_PREFIX = OBS_STR + "."
@@ -36,7 +47,7 @@ class PI0Pytorch(nn.Module):
         self.paligemma_with_expert = PaliGemmaWithActionExpert(
             vlm_config,
             action_expert_config,
-            use_adarms=[False, False],
+            use_adarms=list(USE_ADARMS),
             precision=config.dtype,
         )
 
@@ -252,7 +263,8 @@ class PI0Pytorch(nn.Module):
         suffix_out = suffix_out.to(dtype=torch.float32)
         return self.action_out_proj(suffix_out)
 
-    class PI0Policy(nn.Module):
+
+class PI0Policy(nn.Module):
         """PI0 Policy - standalone implementation without PreTrainedPolicy."""
 
         config_class = PI0Config
@@ -598,3 +610,8 @@ class PI0Pytorch(nn.Module):
             }
 
             return loss, loss_dict
+        
+
+if __name__ == "__main__":
+    # Example: load weights when running this file directly.
+    policy = PI0Policy.load_stored_weights("model.safetensors")
