@@ -10,11 +10,13 @@ from torch.utils.data import DataLoader, Dataset
 
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
-from vla_module.models.pi0.PI0Policy import (
-	OBS_LANGUAGE_ATTENTION_MASK,
-	OBS_LANGUAGE_TOKENS,
-)
 from vla_module.models.pi0.PI0Config import FeatureType, PI0Config, PolicyFeature
+
+
+OBS_PREFIX = "observation"
+OBS_LANGUAGE = f"{OBS_PREFIX}.language"
+OBS_LANGUAGE_TOKENS = f"{OBS_LANGUAGE}.tokens"
+OBS_LANGUAGE_ATTENTION_MASK = f"{OBS_LANGUAGE}.attention_mask"
 
 try:
 	from transformers import AutoTokenizer
@@ -249,15 +251,22 @@ def _augment_config_with_dataset(config: PI0Config, dataset: LeRobotSequenceData
 			c_first = tuple(shape)
 		config.input_features[key] = PolicyFeature(type=FeatureType.VISUAL, shape=c_first)
 
+	state_dim = dataset.base.features[dataset.state_key]["shape"][0]
+	action_dim = dataset.base.features["action"]["shape"][0]
+
+	config.max_state_dim = max(config.max_state_dim, state_dim)
+	config.max_action_dim = max(config.max_action_dim, action_dim)
+
+	config.input_features[dataset.state_key] = PolicyFeature(
+		type=FeatureType.STATE,
+		shape=(state_dim,),
+	)
+	config.output_features["action"] = PolicyFeature(
+		type=FeatureType.ACTION,
+		shape=(action_dim,),
+	)
+
 	config.validate_features()
-	config.max_state_dim = max(
-		config.max_state_dim,
-		dataset.base.features[dataset.state_key]["shape"][0],
-	)
-	config.max_action_dim = max(
-		config.max_action_dim,
-		dataset.base.features["action"]["shape"][0],
-	)
 
 
 def create_lerobot_dataloader(
