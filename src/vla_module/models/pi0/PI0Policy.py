@@ -23,6 +23,7 @@ from vla_module.models.pi0.helpers import (
     make_att_2d_masks,
     pad_vector,
     resize_with_pad_torch,
+    sample_beta,  # Add sample_beta import
 )
 
 OBS_STR = "observation"
@@ -58,10 +59,39 @@ class PI0Pytorch(nn.Module):
         self.action_time_mlp_in = nn.Linear(2 * expert_hidden_size, expert_hidden_size)
         self.action_time_mlp_out = nn.Linear(expert_hidden_size, expert_hidden_size)
 
+        # Initialize gradient checkpointing flag
+        self.gradient_checkpointing_enabled = False
+
         # Compile model if requested
         if config.compile_model:
             torch.set_float32_matmul_precision("high")
             self.sample_actions = torch.compile(self.sample_actions, mode=config.compile_mode)
+            # Also compile the main forward pass used during training
+            self.forward = torch.compile(self.forward, mode=config.compile_mode)
+
+    def gradient_checkpointing_enable(self):
+        """Enable gradient checkpointing for memory optimization."""
+        self.gradient_checkpointing_enabled = True
+        self.paligemma_with_expert.paligemma.language_model.gradient_checkpointing = True
+        self.paligemma_with_expert.paligemma.vision_tower.gradient_checkpointing = True
+        self.paligemma_with_expert.gemma_expert.model.gradient_checkpointing = True
+        logging.info("Enabled gradient checkpointing for PI0Pytorch model")
+
+    def gradient_checkpointing_disable(self):
+        """Disable gradient checkpointing."""
+        self.gradient_checkpointing_enabled = False
+        self.paligemma_with_expert.paligemma.language_model.gradient_checkpointing = False
+        self.paligemma_with_expert.paligemma.vision_tower.gradient_checkpointing = False
+        self.paligemma_with_expert.gemma_expert.model.gradient_checkpointing = False
+        logging.info("Disabled gradient checkpointing for PI0Pytorch model")
+
+    def _apply_checkpoint(self, func, *args, **kwargs):
+        """Helper method to apply gradient checkpointing if enabled."""
+        if self.gradient_checkpointing_enabled and self.training:
+            return torch.utils.checkpoint.checkpoint(
+                func, *args, use_reentrant=False, preserve_rng_state=False, **kwargs
+            )
+        return func(*args, **kwargs)
 
     def _prepare_attention_masks_4d(self, att_2d_masks):
         """Helper method to prepare 4D attention masks for transformer."""
@@ -78,6 +108,20 @@ class PI0Pytorch(nn.Module):
             device=device,
         )
 
+    def sample_time(self, bsize, device):
+        """Sample time steps for flow matching training.
+        
+        Uses Beta distribution for better coverage of the interpolation path.
+        """
+        time_beta = sample_beta(
+            self.config.time_sampling_beta_alpha,
+            self.config.time_sampling_beta_beta,
+            bsize,
+            device
+        )
+        time = time_beta * self.config.time_sampling_scale + self.config.time_sampling_offset
+        return time.to(dtype=torch.float32, device=device)
+
     def embed_prefix(
             self, images, img_masks, lang_tokens, lang_masks
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -88,7 +132,11 @@ class PI0Pytorch(nn.Module):
 
         # Process images
         for img, img_mask in zip(images, img_masks, strict=True):
-            img_emb = self.paligemma_with_expert.embed_image(img)
+            
+            def image_embed_func(img):
+                return self.paligemma_with_expert.embed_image(img)
+            
+            img_emb = self._apply_checkpoint(image_embed_func, img)
             bsize, num_img_embs = img_emb.shape[:2]
 
             embs.append(img_emb)
@@ -96,9 +144,12 @@ class PI0Pytorch(nn.Module):
             att_masks += [0] * num_img_embs
 
         # Process language tokens
-        lang_emb = self.paligemma_with_expert.embed_language_tokens(lang_tokens)
-        lang_emb_dim = lang_emb.shape[-1]
-        lang_emb = lang_emb * math.sqrt(lang_emb_dim)
+        def lang_embed_func(lang_tokens):
+            lang_emb = self.paligemma_with_expert.embed_language_tokens(lang_tokens)
+            lang_emb_dim = lang_emb.shape[-1]
+            return lang_emb * math.sqrt(lang_emb_dim)
+        
+        lang_emb = self._apply_checkpoint(lang_embed_func, lang_tokens)
 
         embs.append(lang_emb)
         pad_masks.append(lang_masks)
@@ -171,7 +222,10 @@ class PI0Pytorch(nn.Module):
         if self.state_proj.weight.dtype == torch.float32:
             state = state.to(torch.float32)
 
-        state_emb = self.state_proj(state)
+        def state_proj_func(state):
+            return self.state_proj(state)
+        
+        state_emb = self._apply_checkpoint(state_proj_func, state)
         embs.append(state_emb[:, None, :])
         bsize = state_emb.shape[0]
         device = state_emb.device
@@ -191,13 +245,20 @@ class PI0Pytorch(nn.Module):
         time_emb = time_emb.type(dtype=timestep.dtype)
 
         # Fuse timestep + action information using an MLP
-        action_emb = self.action_in_proj(noisy_actions)
+        def action_proj_func(noisy_actions):
+            return self.action_in_proj(noisy_actions)
+        
+        action_emb = self._apply_checkpoint(action_proj_func, noisy_actions)
+        
         time_emb = time_emb[:, None, :].expand_as(action_emb)
         action_time_emb = torch.cat([action_emb, time_emb], dim=2)
 
-        x = self.action_time_mlp_in(action_time_emb)
-        x = F.silu(x)
-        action_time_emb = self.action_time_mlp_out(x)
+        def mlp_func(action_time_emb):
+            x = self.action_time_mlp_in(action_time_emb)
+            x = F.silu(x)
+            return self.action_time_mlp_out(x)
+        
+        action_time_emb = self._apply_checkpoint(mlp_func, action_time_emb)
         adarms_cond = None
 
         embs.append(action_time_emb)
@@ -265,36 +326,98 @@ class PI0Pytorch(nn.Module):
             lang_tokens,
             lang_masks,
             state,
-            target_actions,
+            actions,
             noise=None,
-            num_steps=None,
+            time=None,
     ) -> Tensor:
-        """Forward pass used for training.
-
-        Returns the denoised action predictions so external callers can compute
-        supervision losses (e.g., MSE against ground-truth actions).
+        """Do a full training forward pass and compute the loss.
+        
+        Implements flow matching training objective from PI0.
+        
+        Args:
+            images: List of image tensors
+            img_masks: List of image masks
+            lang_tokens: Language tokens
+            lang_masks: Language attention masks
+            state: Robot state
+            actions: Ground truth action sequences
+            noise: Optional noise (sampled if not provided)
+            time: Optional timesteps (sampled if not provided)
+            
+        Returns:
+            MSE loss tensor of shape (batch_size, chunk_size, action_dim)
         """
-        if num_steps is None:
-            num_steps = self.config.num_inference_steps
-
-        device = state.device
-
+        # Sample noise and time if not provided
         if noise is None:
-            noise = self.sample_noise(target_actions.shape, device)
-
-        prefix_pad_masks, past_key_values = self._prepare_prefix_context(
+            noise = self.sample_noise(actions.shape, actions.device)
+        
+        if time is None:
+            time = self.sample_time(actions.shape[0], actions.device)
+        
+        # Flow matching interpolation between noise and actions
+        # x_t = t * noise + (1 - t) * action
+        time_expanded = time[:, None, None]
+        x_t = time_expanded * noise + (1 - time_expanded) * actions
+        
+        # Velocity field to predict: u_t = noise - action
+        u_t = noise - actions
+        
+        # Embed prefix (images + language)
+        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(
             images, img_masks, lang_tokens, lang_masks
         )
-
-        preds = self._run_denoising_loop(
-            state,
-            prefix_pad_masks,
-            past_key_values,
-            noise,
-            num_steps,
+        
+        # Embed suffix (state + noisy actions + time)
+        suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = self.embed_suffix(
+            state, x_t, time
         )
-
-        return preds
+        
+        # Cast to bfloat16 if needed
+        if (
+            self.paligemma_with_expert.paligemma.language_model.layers[0].self_attn.q_proj.weight.dtype
+            == torch.bfloat16
+        ):
+            suffix_embs = suffix_embs.to(dtype=torch.bfloat16)
+            prefix_embs = prefix_embs.to(dtype=torch.bfloat16)
+        
+        # Combine masks
+        pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
+        att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
+        
+        # Create 2D attention masks
+        att_2d_masks = make_att_2d_masks(pad_masks, att_masks)
+        position_ids = torch.cumsum(pad_masks, dim=1) - 1
+        
+        att_2d_masks_4d = self._prepare_attention_masks_4d(att_2d_masks)
+        
+        # Forward through both VLM and action expert
+        def forward_func(prefix_embs, suffix_embs, att_2d_masks_4d, position_ids, adarms_cond):
+            (_, suffix_out), _ = self.paligemma_with_expert.forward(
+                attention_mask=att_2d_masks_4d,
+                position_ids=position_ids,
+                past_kv=None,
+                inputs_embeds=[prefix_embs, suffix_embs],
+                use_cache=False,
+                adarms_cond=[None, adarms_cond],
+            )
+            return suffix_out
+        
+        suffix_out = self._apply_checkpoint(
+            forward_func, prefix_embs, suffix_embs, att_2d_masks_4d, position_ids, adarms_cond
+        )
+        
+        # Extract action predictions
+        suffix_out = suffix_out[:, -self.config.chunk_size:]
+        suffix_out = suffix_out.to(dtype=torch.float32)
+        
+        def action_out_proj_func(suffix_out):
+            return self.action_out_proj(suffix_out)
+        
+        # Predict velocity field
+        v_t = self._apply_checkpoint(action_out_proj_func, suffix_out)
+        
+        # Return MSE loss between predicted and true velocity
+        return F.mse_loss(u_t, v_t, reduction="none")
 
     def denoise_step(
             self,
@@ -477,20 +600,20 @@ class PI0Policy(nn.Module):
                     print(f"  ... and {len(missing_keys) - 3} more")
 
             if unexpected_keys:
-                print(f"⚠ Unexpected {len(unexpected_keys)} keys")
+                print(f"nexpected {len(unexpected_keys)} keys")
                 for key in unexpected_keys[:3]:
                     print(f"  - {key}")
                 if len(unexpected_keys) > 3:
                     print(f"  ... and {len(unexpected_keys) - 3} more")
 
             if not missing_keys and not unexpected_keys:
-                print("✓ All keys loaded successfully!")
+                print("All keys loaded successfully!")
 
             # Move to device and set to eval mode
             instance.model.to(config.device)
             instance.eval()
 
-            print(f"✓ Model loaded and ready on device: {config.device}")
+            print(f"Model loaded and ready on device: {config.device}")
             return instance
 
         def _fix_pytorch_state_dict_keys(self, state_dict, model_config):
@@ -716,8 +839,9 @@ class PI0Policy(nn.Module):
             state = self.prepare_state(batch)
             actions = self.prepare_action(batch)
 
-            # Run forward pass to obtain predicted actions
-            pred_actions = self.model.forward(
+            # Run forward pass to get loss tensor (flow matching training objective)
+            # model.forward() now returns MSE loss with shape [batch, chunk_size, action_dim]
+            mse_losses = self.model.forward(
                 images,
                 img_masks,
                 lang_tokens,
@@ -726,22 +850,17 @@ class PI0Policy(nn.Module):
                 actions,
             )
 
-            # Truncate tensors to actual action dimensions
+            # Truncate loss tensor to actual action dimensions
             original_action_dim = self.config.output_features["action"].shape[0]
-            pred_actions = pred_actions[:, :, :original_action_dim]
-            target_actions = actions[:, :, :original_action_dim]
+            mse_losses = mse_losses[:, :, :original_action_dim]
 
-            mse_losses = F.mse_loss(pred_actions, target_actions, reduction="none")
+            # Compute mean loss for backprop
             loss = mse_losses.mean()
 
-            mae = torch.mean(torch.abs(pred_actions - target_actions)).item()
-            l2 = torch.sqrt(torch.mean((pred_actions - target_actions) ** 2)).item()
-
+            # Additional metrics (optional, for logging)
             loss_dict = {
                 "loss": loss.item(),
                 "mse": loss.item(),
-                "mae": mae,
-                "l2": l2,
                 "loss_per_dim": mse_losses.mean(dim=[0, 1]).detach().cpu().numpy().tolist(),
             }
 

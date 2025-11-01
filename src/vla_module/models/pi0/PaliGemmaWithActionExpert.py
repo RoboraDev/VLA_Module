@@ -9,7 +9,8 @@ from transformers.models.gemma import modeling_gemma
 def compute_layer_complete(
     layer_idx, inputs_embeds, attention_mask, position_ids, adarms_cond, paligemma, action_expert
 ):
-    models = [paligemma.language_model, action_expert.model]
+    language_core = getattr(paligemma.language_model, "model", paligemma.language_model)
+    models = [language_core, action_expert.model]
     query_states = []
     key_states = []
     value_states = []
@@ -38,13 +39,17 @@ def compute_layer_complete(
         device=query_states.device,
         dtype=query_states.dtype,
     )
-    cos, sin = paligemma.model.language_model.rotary_emb(dummy_tensor, position_ids)
+    cos, sin = language_core.rotary_emb(dummy_tensor, position_ids)
     query_states, key_states = modeling_gemma.apply_rotary_pos_emb(
         query_states, key_states, cos, sin, unsqueeze_dim=1
     )
     batch_size = query_states.shape[0]
-    scaling = paligemma.language_model.layers[layer_idx].self_attn.scaling
+    scaling = language_core.layers[layer_idx].self_attn.scaling
     # Attention computation
+    if __debug__:
+        print(
+            f"[debug] layer={layer_idx} q={query_states.shape} k={key_states.shape} v={value_states.shape} mask={attention_mask.shape}"
+        )
     att_output, _ = modeling_gemma.eager_attention_forward(
         paligemma.language_model.layers[layer_idx].self_attn,
         query_states,
@@ -144,11 +149,39 @@ class PaliGemmaWithActionExpert(
     ## Got these features abstracted from transformers library.
     # Will be used later on to convert image to embeddings.
     def embed_image(self, image: torch.Tensor):
-        return self.paligemma.model.get_image_features(image)
+        # HF PaliGemma has evolved its module layout across releases. Try multiple access
+        # paths so we remain compatible regardless of whether the wrapper exposes
+        # `.model` or places helpers directly on the vision tower.
+        if hasattr(self.paligemma, "model") and hasattr(self.paligemma.model, "get_image_features"):
+            return self.paligemma.model.get_image_features(image)
+
+        vision_tower = getattr(self.paligemma, "vision_tower", None)
+        if vision_tower is not None:
+            if hasattr(vision_tower, "get_image_features"):
+                return vision_tower.get_image_features(image)
+            vision_model = getattr(vision_tower, "vision_model", None)
+            if vision_model is not None and hasattr(vision_model, "get_image_features"):
+                return vision_model.get_image_features(image)
+
+        if hasattr(self.paligemma, "get_image_features"):
+            return self.paligemma.get_image_features(image)
+
+        raise AttributeError("PaliGemma module does not expose a get_image_features helper")
 
     # Will be used later on to convert language tokens to embeddings.
     def embed_language_tokens(self, tokens: torch.Tensor):
-        return self.paligemma.language_model.embed_tokens(tokens)
+        language_model = getattr(self.paligemma, "language_model", None)
+        if language_model is not None:
+            if hasattr(language_model, "embed_tokens"):
+                return language_model.embed_tokens(tokens)
+            inner = getattr(language_model, "model", None)
+            if inner is not None and hasattr(inner, "embed_tokens"):
+                return inner.embed_tokens(tokens)
+
+        if hasattr(self.paligemma, "embed_tokens"):
+            return self.paligemma.embed_tokens(tokens)
+
+        raise AttributeError("PaliGemma language model does not expose an embed_tokens helper")
 
     def forward(
             self,
@@ -162,9 +195,12 @@ class PaliGemmaWithActionExpert(
         if adarms_cond is None:
             adarms_cond = [None, None]
 
+        language_core = getattr(self.paligemma.language_model, "model", self.paligemma.language_model)
+        expert_core = getattr(self.gemma_expert, "model", self.gemma_expert)
+
         # Path 1[1]: VLM-only processing
         if inputs_embeds[1] is None:
-            prefix_output = self.paligemma.language_model.forward(
+            prefix_output = language_core.forward(
                 inputs_embeds=inputs_embeds[0],
                 attention_mask=attention_mask,
                 position_ids=position_ids,
@@ -172,13 +208,25 @@ class PaliGemmaWithActionExpert(
                 use_cache=use_cache,
                 adarms_cond=adarms_cond[0] if adarms_cond is not None else None,
             )
-            prefix_past_key_values = prefix_output.past_key_values
-            prefix_output = prefix_output.last_hidden_state
+            prefix_past_key_values = getattr(prefix_output, "past_key_values", None)
+
+            if hasattr(prefix_output, "last_hidden_state") and prefix_output.last_hidden_state is not None:
+                prefix_hidden = prefix_output.last_hidden_state
+            elif hasattr(prefix_output, "hidden_states") and prefix_output.hidden_states:
+                prefix_hidden = prefix_output.hidden_states[-1]
+            elif isinstance(prefix_output, (tuple, list)) and len(prefix_output) > 0:
+                prefix_hidden = prefix_output[0]
+                if prefix_past_key_values is None and len(prefix_output) > 1:
+                    prefix_past_key_values = prefix_output[1]
+            else:
+                raise RuntimeError("Unexpected output type from Gemma language model")
+
+            prefix_output = prefix_hidden
             suffix_output = None
 
         # Path 2[0]: Action expert-only processing
         elif inputs_embeds[0] is None:
-            suffix_output = self.gemma_expert.model.forward(
+            suffix_output = expert_core.forward(
                 inputs_embeds=inputs_embeds[1],
                 attention_mask=attention_mask,
                 position_ids=position_ids,
@@ -186,32 +234,80 @@ class PaliGemmaWithActionExpert(
                 use_cache=use_cache,
                 adarms_cond=adarms_cond[1] if adarms_cond is not None else None,
             )
-            suffix_output = suffix_output.last_hidden_state
+            if hasattr(suffix_output, "last_hidden_state") and suffix_output.last_hidden_state is not None:
+                suffix_hidden = suffix_output.last_hidden_state
+            elif hasattr(suffix_output, "hidden_states") and suffix_output.hidden_states:
+                suffix_hidden = suffix_output.hidden_states[-1]
+            elif isinstance(suffix_output, (tuple, list)) and len(suffix_output) > 0:
+                suffix_hidden = suffix_output[0]
+            else:
+                raise RuntimeError("Unexpected output type from Gemma expert model")
+
+            suffix_output = suffix_hidden
             prefix_output = None
             prefix_past_key_values = None
 
         # Path 3[1-0]: Dual processing (both VLM and action expert)
         else:
-            models = [self.paligemma.language_model, self.gemma_expert.model]
+            models = [language_core, expert_core]
             num_layers = self.paligemma.config.text_config.num_hidden_layers
 
-            # Process all layers sequentially
+            # Check if gradient checkpointing is enabled
+            use_gradient_checkpointing = (
+                hasattr(self.gemma_expert.model, "gradient_checkpointing")
+                and self.gemma_expert.model.gradient_checkpointing
+                and self.training
+            ) or (
+                hasattr(self, "gradient_checkpointing")
+                and self.gradient_checkpointing
+                and self.training
+            )
+
+            # Process all layers with gradient checkpointing if enabled
             for layer_idx in range(num_layers):
-                inputs_embeds = compute_layer_complete(
-                    layer_idx,
-                    inputs_embeds,
-                    attention_mask,
-                    position_ids,
-                    adarms_cond,
-                    paligemma=self.paligemma,
-                    action_expert=self.gemma_expert,
-                )
+                if use_gradient_checkpointing:
+                    inputs_embeds = torch.utils.checkpoint.checkpoint(
+                        compute_layer_complete,
+                        layer_idx,
+                        inputs_embeds,
+                        attention_mask,
+                        position_ids,
+                        adarms_cond,
+                        use_reentrant=False,
+                        preserve_rng_state=False,
+                        paligemma=self.paligemma,
+                        action_expert=self.gemma_expert,
+                    )
+                else:
+                    inputs_embeds = compute_layer_complete(
+                        layer_idx,
+                        inputs_embeds,
+                        attention_mask,
+                        position_ids,
+                        adarms_cond,
+                        paligemma=self.paligemma,
+                        action_expert=self.gemma_expert,
+                    )
 
             # Apply final layer normalization
-            outputs_embeds = []
-            for i, hidden_states in enumerate(inputs_embeds):
-                out_emb, _ = models[i].norm(hidden_states, cond=adarms_cond[i])
-                outputs_embeds.append(out_emb)
+            def compute_final_norms(inputs_embeds, adarms_cond):
+                outputs_embeds = []
+                for i, hidden_states in enumerate(inputs_embeds):
+                    out_emb, _ = models[i].norm(hidden_states, cond=adarms_cond[i])
+                    outputs_embeds.append(out_emb)
+                return outputs_embeds
+            
+            # Apply gradient checkpointing to final norm if enabled
+            if use_gradient_checkpointing:
+                outputs_embeds = torch.utils.checkpoint.checkpoint(
+                    compute_final_norms,
+                    inputs_embeds,
+                    adarms_cond,
+                    use_reentrant=False,
+                    preserve_rng_state=False,
+                )
+            else:
+                outputs_embeds = compute_final_norms(inputs_embeds, adarms_cond)
 
             prefix_output = outputs_embeds[0]
             suffix_output = outputs_embeds[1]
