@@ -5,6 +5,27 @@ import torch.nn.functional as F
 
 from vla_module.utils.device_info import get_safe_dtype
 
+def sample_beta(alpha, beta, bsize, device):
+    """Sample from Beta distribution for time sampling during flow matching training.
+    
+    This is used to sample timesteps from a Beta distribution during training,
+    which helps with better coverage of the interpolation path.
+    
+    Args:
+        alpha: Alpha parameter for Beta distribution
+        beta: Beta parameter for Beta distribution  
+        bsize: Batch size
+        device: Device to create tensors on
+        
+    Returns:
+        Tensor of shape (bsize,) sampled from Beta(alpha, beta)
+    """
+    alpha_t = torch.as_tensor(alpha, dtype=torch.float32, device=device)
+    beta_t = torch.as_tensor(beta, dtype=torch.float32, device=device)
+    dist = torch.distributions.Beta(alpha_t, beta_t)
+    
+    return dist.sample((bsize,))
+
 def make_att_2d_masks(pad_masks, att_masks):
     # Taken from OpenPI repository
     """
