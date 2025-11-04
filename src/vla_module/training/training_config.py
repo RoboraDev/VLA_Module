@@ -4,6 +4,32 @@ from typing import Dict, List, Optional, Tuple
 
 import torch
 
+@dataclass
+class LoggingConfig:
+    """Configuration for logging."""
+    
+    log_every_n_steps: int = 10
+    """Log metrics every N steps"""
+    
+    use_wandb: bool = False
+    """Whether to use Weights & Biases"""
+    
+    wandb_project: Optional[str] = None
+    """W&B project name"""
+    
+    wandb_entity: Optional[str] = None
+    """W&B entity/team name"""
+    
+    wandb_run_name: Optional[str] = None
+    """W&B run name"""
+    
+    log_gradients: bool = False
+    """Whether to log gradient statistics"""
+    
+    log_weights: bool = False
+    """Whether to log weight statistics"""
+
+
 
 @dataclass
 class OptimizerConfig:
@@ -179,7 +205,7 @@ class ActionHeadTrainingConfig:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     """Logging configuration"""
     
-    # Evaluation
+    # Evaluation, ful
     eval_every_n_steps: int = 500
     """Evaluate every N steps"""
     
