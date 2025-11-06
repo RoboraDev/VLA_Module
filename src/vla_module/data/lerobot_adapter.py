@@ -3,6 +3,8 @@
 This module provides adapters to bridge LeRobot datasets with VLA models (SmolVLA, PI0),
 handling observation/action space mapping, camera feeds, and state features with
 configurable dimensions.
+
+This part of the dataloader pipeline directly integrates or link with the lerobot dataset from the framework.
 """
 
 from dataclasses import dataclass, field
