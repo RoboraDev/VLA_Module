@@ -28,14 +28,14 @@ from vla_module.training.action_space_config import (
     create_action_space_config_from_dataset,
     create_observation_space_config_from_dataset,
 )
-from vla_module.training.checkpoint_utils import (
+from vla_module.training.utils.checkpoint_utils import (
     cleanup_old_checkpoints,
     get_latest_checkpoint,
     load_checkpoint,
     load_pretrained_model,
     save_checkpoint,
 )
-from vla_module.training.freeze_utils import (
+from vla_module.training.utils.freeze_utils import (
     print_trainable_parameters,
     setup_action_head_only_training,
 )

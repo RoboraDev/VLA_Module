@@ -27,7 +27,7 @@ from vla_module.training.training_config import (
 from vla_module.training.action_head_trainer import ActionHeadTrainer
 
 # Freezing utilities
-from vla_module.training.freeze_utils import (
+from vla_module.training.utils.freeze_utils import (
     freeze_module,
     freeze_vision_encoder,
     freeze_language_model,
@@ -39,7 +39,7 @@ from vla_module.training.freeze_utils import (
 )
 
 # Checkpoint utilities
-from vla_module.training.checkpoint_utils import (
+from vla_module.training.utils.checkpoint_utils import (
     save_checkpoint,
     load_checkpoint,
     load_pretrained_model,
