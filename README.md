@@ -42,67 +42,105 @@ python311 -m venv .venv
 source .venv/bin/activate
 ```
 
-## Project Structure (Subject to change)
+## Project Structure
 
 ```
-VLA_Module/
-├── vla_module/                   # Core module package
-│   ├── actions/
-│   │   ├── __init__.py
-│   │   └── tokenizers.py         # Logic for discretizing action bins
-│   │
-│   ├── api/
-│   │   ├── __init__.py
-│   │   ├── server.py             # FastAPI application for serving models
-│   │   └── endpoints.py          # API endpoints for inference
-│   │
-│   ├── cli/
-│   │   ├── __init__.py
-│   │   └── main.py               # Main CLI application
-│   │
-│   ├── data/
-│   │   ├── __init__.py
-│   │   └── dataloaders.py        # Unified dataset loaders from LeRobot
-│   │
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── hub.py                # Functions to download models from HF
-│   │   ├── architectures.py      # Model wrapper classes for VLA models
-│   │   └── inference.py          # Inference pipeline logic
-│   │
-│   ├── simulation/
-│   │   ├── __init__.py
-│   │   └── env_wrappers.py       # Wrappers for PyBullet and Gymnasium API
-│   │
-│   ├── training/
-│   │   ├── __init__.py
-│   │   ├── trainers.py           # Core training loops (Imitation, RL)
-│   │   ├── action_head_tuner.py  # Logic for fine-tuning action heads
-│   │   └── vlm_backbone_tuner.py # Logic for full VLM backbone fine-tuning
-│   │
-│   └── utils/
-│       ├── __init__.py
-│       └── config_loader.py      # Utilities for loading YAML configs
-│
-├── configs/
-│   ├── models/
-│   │   ├── pi0.yaml
-│   │   └── openvla.yaml
-│   └── training/
-│       └── default_imitation.yaml
-│
-├── demos/
-│   └── run_inference_demo.py     # Demo scripts for inference
-│
-├── tests/
-│   ├── test_cli.py
-│   └── test_inference.py
-│
-├── .gitignore
-├── LICENSE
+VLA_Modules/
+├── main.py                       # Main entry point
 ├── pyproject.toml                # Project metadata and dependencies
+├── requirements.txt              # Python dependencies
 ├── uv.lock                       # UV environment lock file
-└── README.md                     # Project documentation
+├── README.md                     # Project documentation
+├── configs/                      # Configuration files
+│   └── models/                   # Model-specific configurations
+│       ├── openvla.yaml
+│       ├── pi0.yaml
+│       ├── smolvla.yaml
+│       └── training/
+│           └── run_inference_demo.py
+├── demos/                        # Demo scripts
+│   ├── demo_cli_usage.py
+│   └── run_inference_demo.py
+├── docs/                         # Documentation
+│   ├── Considerations.md
+├── examples/                     # Example scripts
+│   └── train_smolvla_aloha.py
+├── src/                          # Source code
+│   ├── vla_module/               # Core module package
+│   │   ├── __init__.py
+│   │   ├── config_loader.py      # Configuration loading utilities
+│   │   ├── actions/              # Action tokenization logic
+│   │   │   ├── __init__.py
+│   │   │   └── tokenizers.py
+│   │   ├── api/                  # REST API components
+│   │   │   ├── __init__.py
+│   │   │   ├── endpoints.py
+│   │   │   └── server.py
+│   │   ├── cli/                  # Command-line interface
+│   │   │   ├── __init__.py
+│   │   │   └── main.py
+│   │   ├── data/                 # Data loading and processing
+│   │   │   ├── __init__.py
+│   │   │   ├── dataloaders.py
+│   │   │   ├── lerobot/
+│   │   │   │   └── pusht/
+│   │   │   └── lerobot_adapter.py
+│   │   ├── models/               # Model architectures and loading
+│   │   │   ├── __init__.py
+│   │   │   ├── architectures.py
+│   │   │   ├── hub.py
+│   │   │   ├── inference.py
+│   │   │   ├── model_loader.py
+│   │   │   ├── grootn1/
+│   │   │   │   └── __init__.py
+│   │   │   ├── grootn1_5/
+│   │   │   │   └── __init__.py
+│   │   │   ├── pi0/
+│   │   │   │   ├── __init__.py
+│   │   │   │   ├── PI0Config.py
+│   │   │   │   ├── PI0Policy.py
+│   │   │   │   ├── PaliGemmaWithActionExpert.py
+│   │   │   │   ├── helpers.py
+│   │   │   │   ├── model.safetensors
+│   │   │   │   ├── pi0_arch.py
+│   │   │   │   └── test.py
+│   │   │   ├── pi0_5/
+│   │   │   │   └── __init__.py
+│   │   │   └── smolvla/
+│   │   │       ├── __init__.py
+│   │   │       ├── SmolVLAConfig.py
+│   │   │       ├── SmolVLAPolicy.py
+│   │   │       ├── SmolVLMWithExpert.py
+│   │   │       ├── helpers.py
+│   │   │       └── smolvla_arch.py
+│   │   ├── processor/            # Data preprocessing (empty)
+│   │   ├── simulation/           # Simulation environment wrappers
+│   │   │   ├── __init__.py
+│   │   │   ├── SIM_Considerations.md
+│   │   │   ├── cuda-kernels/
+│   │   │   └── env_wrappers.py
+│   │   ├── training/             # Training pipelines
+│   │   │   ├── __init__.py
+│   │   │   ├── README.md
+│   │   │   ├── action_head_trainer.py
+│   │   │   ├── action_head_tuner.py
+│   │   │   ├── action_space_config.py
+│   │   │   ├── train_vla.py
+│   │   │   ├── training_config.py
+│   │   │   ├── lr_schedulers/
+│   │   │   │   ├── LRSchedulerConfigs.py
+│   │   │   │   └── lrscheduler_state.py
+│   │   │   ├── optimizers/
+│   │   │   │   ├── OptimizerConfigs.py
+│   │   │   │   └── optim_state.py
+│   │   │   └── utils/
+│   │   │       ├── checkpoint_utils.py
+│   │   │       └── freeze_utils.py
+│   │   └── utils/                # Utility functions
+│           ├── __init__.py
+│           ├── device_info.py
+│           ├── io_utils.py
+│           └── param_utils.py
 ```
 
 ## Supported Models
